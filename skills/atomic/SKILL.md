@@ -1,7 +1,35 @@
 ---
 name: atomic
 description: Atomic development workflow — scaffold structure or write one function, test it, commit if green, fix if red. Use this whenever someone wants to implement a feature, add a function, write code incrementally, scaffold a new project, or follow a TDD dev loop.
-argument-hint: "[what to implement]"
+argument-hint: "[task description] or [task id]"
+---
+
+## Step 0 — Resolve the task
+
+Check if `$ARGUMENTS` is a numeric ID or a text prompt:
+
+**If numeric** — look up the task from `.devkit/tasks.db`:
+```
+uv run python -c "
+import sqlite3
+conn = sqlite3.connect('.devkit/tasks.db')
+row = conn.execute('SELECT id, title, description, status FROM tasks WHERE id = ?', ($ARGUMENTS,)).fetchone()
+conn.close()
+if not row: raise SystemExit('Task $ARGUMENTS not found in .devkit/tasks.db')
+print(f'id={row[0]} | status={row[3]}')
+print(f'title: {row[1]}')
+print(f'description: {row[2]}')
+"
+```
+- If the task status is `done`, stop and tell the user it's already completed.
+- If found, use `title` + `description` as the task definition for all steps below.
+- Mark it `in_progress` immediately:
+  ```
+  uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('in_progress', $ARGUMENTS)); conn.commit(); conn.close()"
+  ```
+
+**If text** — use `$ARGUMENTS` directly as the task definition.
+
 ---
 
 Task: $ARGUMENTS
@@ -115,7 +143,10 @@ Follow this loop strictly. One function per iteration, one commit per green test
 1. **Write one function** — the smallest unit that satisfies the task. No helpers, no extras alongside it.
 2. **Write tests** — cover the happy path and one meaningful edge case. Keep tests short.
 3. **Run the tests** — execute them immediately using Docker. Do not assume the user has any runtime or toolchain installed locally. Use `docker build` and `docker run` (or `docker compose`) to run tests in a container.
-4. **If green** — commit with a single focused message.
+4. **If green** — commit with a single focused message. If the task came from a numeric ID, also mark it done:
+   ```
+   uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('done', <id>)); conn.commit(); conn.close()"
+   ```
 5. **If red** — diagnose the failure, fix the function or the test (whichever is wrong), return to step 3.
 
 ### Commit message format
