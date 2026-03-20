@@ -49,6 +49,7 @@ Split the task into atomic units. Each atomic task must:
 - Contains "and" — it's two tasks
 - Touches more than one file or layer
 - Is vague ("set up X", "handle Y") — break it into concrete actions
+- Would produce more than 100 lines of implementation code (tests excluded) — if you estimate it will exceed 100 lines, split it
 
 **Good atomic tasks:**
 - `create users table migration` — adds one schema migration file
@@ -103,7 +104,7 @@ Write this as a temporary script, populate the `tasks` list with the decomposed 
 
 ## Step 5 — Display result
 
-After saving, query and display all tasks:
+After saving, run this exact query and print the table — do not summarize or reformat:
 
 ```
 uv run python -c "
@@ -111,9 +112,13 @@ import sqlite3
 conn = sqlite3.connect('.devkit/tasks.db')
 rows = conn.execute('SELECT id, exec_order, title, status FROM tasks ORDER BY exec_order').fetchall()
 conn.close()
-print(f'{'ID':<4} {'Order':<6} {'Title':<40} {'Status'}')
-print('-' * 65)
+print(f'{'ID':<5} {'Order':<7} {'Title':<45} Status')
+print('-' * 70)
 for r in rows:
-    print(f'{r[0]:<4} {r[1]:<6} {r[2]:<40} {r[3]}')
+    print(f'{r[0]:<5} {r[1]:<7} {r[2]:<45} {r[3]}')
+print()
+print('Use: /devkit:atomic <ID> to execute a task')
 "
 ```
+
+The ID column is what the user passes to `/devkit:atomic`. Always show it.
