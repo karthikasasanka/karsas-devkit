@@ -36,7 +36,28 @@ Task: $ARGUMENTS
 
 ---
 
-## Step 1 — Check for existing code
+## Step 1 — Create a feature branch
+
+Check the current branch:
+```
+git branch --show-current
+```
+
+If already on a feature branch (not `main` or `master`), continue on it.
+
+If on `main` or `master`, derive a branch name from the task title — lowercase, hyphenated, no special chars — and create it:
+```
+git checkout -b <branch-name>
+```
+
+Examples:
+- task `add POST /users route handler` → `feat/add-post-users-route-handler`
+- task `write get-user-by-id query` → `feat/write-get-user-by-id-query`
+- task id `3` with title `create users table migration` → `feat/create-users-table-migration`
+
+---
+
+## Step 2 — Check for existing code
 
 Scan the current directory for source files. Two paths:
 
