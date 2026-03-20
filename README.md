@@ -5,7 +5,7 @@ Claude Code plugin for clean, incremental development.
 ## Install
 
 ```
-/plugin marketplace add github:karthikasasanka/karsas-devkit
+/plugin marketplace add https://github.com/karthikasasanka/karsas-devkit
 /plugin install devkit@karsas-devkit
 ```
 
