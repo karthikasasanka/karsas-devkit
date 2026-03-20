@@ -83,7 +83,8 @@ Generate a `PROJECT_STRUCTURE.md` that shows the minimal base structure for the 
 - Do not write code in the structure doc. Describe intent in plain text.
 - Do not create the actual files. Write the markdown only.
 - Stop and ask the user to confirm the structure before doing anything else.
-- After the user confirms and files are created: run `git init .`, create `.gitignore` and `.dockerignore`, then commit immediately with: `init: base project structure`
+- After the user confirms and files are created: run `git init .` **in the current working directory** (never inside a subfolder), create `.gitignore` and `.dockerignore`, then commit immediately with: `init: base project structure`
+- Always add `.devkit/` to `.gitignore` — it contains task automation files that must not be committed
 - Never assume any runtime, compiler, or toolchain is installed on the user's machine. Always use Docker to build and run. Include a `Dockerfile` in the project structure.
 
 ### What the starter example should describe (not code)

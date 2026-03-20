@@ -98,7 +98,7 @@ conn.close()
 print(f"Saved {len(tasks)} tasks to .devkit/tasks.db")
 ```
 
-Write this as a temporary script, populate the `tasks` list with the decomposed tasks from Step 2, run it with `uv run python <script>`, then delete the script.
+Write this as `.devkit/save_tasks.py`, populate the `tasks` list with the decomposed tasks from Step 3, run it with `uv run python .devkit/save_tasks.py`, then delete it. All automation files must stay inside `.devkit/` — never write temp scripts to the project root.
 
 ---
 
