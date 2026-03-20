@@ -8,7 +8,23 @@ Task: $ARGUMENTS
 
 ---
 
-## Step 1 — Elaborate the task
+## Step 1 — Clarify unknowns
+
+Before elaborating, scan the prompt for any missing technical decisions. Ask about **all** that are unspecified — do not assume any of them. Ask as a single grouped question, not one at a time:
+
+- **Language/framework** — e.g. Python/FastAPI, Node/Express, Go, etc.
+- **Database** — e.g. SQLite, Postgres, MongoDB, in-memory
+- **Auth mechanism** — e.g. JWT, sessions, OAuth (only if auth is relevant to the task)
+- **Testing** — should tests be included? If yes, which framework?
+- **API style** — REST, GraphQL, RPC (only if an API is being built)
+
+Only ask about what's actually relevant to the task. Skip questions that don't apply.
+
+Do not proceed until all relevant unknowns are answered.
+
+---
+
+## Step 2 — Elaborate the task
 
 Restate the original prompt as a detailed description:
 - Clarify intent: what is the end goal?
@@ -20,7 +36,7 @@ Output this as a short paragraph before proceeding.
 
 ---
 
-## Step 2 — Decompose into atomic tasks
+## Step 3 — Decompose into atomic tasks
 
 Split the task into atomic units. Each atomic task must:
 - Start with a single action verb (add, create, write, configure, update, delete)
@@ -45,7 +61,7 @@ Split the task into atomic units. Each atomic task must:
 
 ---
 
-## Step 3 — Save to SQLite
+## Step 4 — Save to SQLite
 
 Create `.devkit/` in the current working directory if it doesn't exist.
 
@@ -85,7 +101,7 @@ Write this as a temporary script, populate the `tasks` list with the decomposed 
 
 ---
 
-## Step 4 — Display result
+## Step 5 — Display result
 
 After saving, query and display all tasks:
 
