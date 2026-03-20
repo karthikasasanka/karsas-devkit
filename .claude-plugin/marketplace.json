@@ -1,0 +1,22 @@
+{
+  "name": "karsas-devkit",
+  "owner": {
+    "name": "Kartheekasasanka Kaipa"
+  },
+  "metadata": {
+    "description": "Atomic development workflow skills for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "devkit",
+      "source": "./",
+      "description": "Atomic development workflow — decompose tasks and implement them one function at a time",
+      "author": {
+        "name": "Kartheekasasanka Kaipa"
+      },
+      "repository": "https://github.com/karthikasasanka/karsas-devkit",
+      "license": "MIT",
+      "keywords": ["atomic", "dev-loop", "workflow", "tdd"]
+    }
+  ]
+}
