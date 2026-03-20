@@ -1,22 +1,33 @@
-# Atomic Dev
+# karsas-devkit
 
-A Claude Code skill for clean, incremental development.
+Claude Code plugin for clean, incremental development.
 
 ## Install
 
-    /plugin install https://github.com/karthikasasanka/karsas-devkit
+```
+/plugin install https://github.com/karthikasasanka/karsas-devkit
+```
 
-## Usage
+## Skills
 
-    /devkit:atomic <what to implement>
+### `atomize` — decompose a task
 
-## Workflow
+Break a large or vague task into atomic subtasks and save them to `.devkit/tasks.db`.
 
--   Write one function\
--   Write tests\
--   Run tests\
--   If green → commit\
--   If red → fix and repeat
+```
+/atomize build a REST API for user authentication
+```
+
+### `atomic` — implement one task
+
+Write one function, test it, commit if green, fix if red. Accepts a prompt or a task ID from `atomize`.
+
+```
+/atomic add a login route that validates JWT tokens
+/atomic 3
+```
+
+When given a task ID, the skill marks it `in_progress` on start and `done` on commit.
 
 ## License
 
