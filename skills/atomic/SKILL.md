@@ -140,6 +140,8 @@ Agents collaborate directly in a pipeline — each agent's output feeds into the
 
 Agents must complete in order — later agents depend on earlier agents' output. For example, **feature-dev:feature-dev** must not start coding until **frontend-design:frontend-design** has finalized the design. Pick the pipeline that matches the task type.
 
+**code-review:code-review** is mandatory at the end of every pipeline — do not skip it. If code-review flags issues, send them back to the responsible agent for fixes before proceeding to quality gates.
+
 ---
 
 ## Atomic Dev Loop
@@ -150,7 +152,7 @@ One logical unit per iteration, one commit per green test. The main agent orches
 
 1. **Delegate** — trigger the agent pipeline based on Step 1 routing. Agents collaborate directly — each agent's output feeds into the next. Pass the task context and any prior fix feedback to the first agent in the pipeline.
 2. **Verify** — main agent checks the agent's output against all [quality gates](#quality-gates).
-3. **If all gates pass** — commit with a focused message, then run the **simplify** skill on the changed code. If simplify produces changes, commit them with message `refactor: simplify <what changed>`.
+3. **If all gates pass** — commit with a focused message, then you MUST run the **simplify** skill on the changed code (do not skip this step). If simplify produces changes, commit them with message `refactor: simplify <what changed>`.
 4. **If any gate fails** — identify which gate(s) failed and send specific failure details back to the responsible subagent for fixes. Max **3 fix cycles** per iteration — if still failing after 3 attempts, stop and ask the user.
 5. **Repeat** until the task is complete.
 6. **Finalize** — once all iterations are done:
@@ -162,11 +164,25 @@ One logical unit per iteration, one commit per green test. The main agent orches
    - **Ask the user for confirmation** before pushing and opening a PR.
    - If confirmed, push the feature branch: `git push -u origin <branch-name>`
    - Open a pull request against the trunk branch and summarize what was implemented. If the task references an external issue (Jira, GitHub Issues, Linear), include the issue key in the PR title (e.g., `PL-2: add user login endpoint`).
+   - Print the completion checklist showing which steps were executed:
+     ```
+     Atomic workflow complete:
+     [x/skip] context7 docs fetched
+     [x/skip] feature-dev delegated
+     [x/skip] frontend-design delegated
+     [x/skip] code-review ran
+     [x/skip] simplify ran
+     [x/skip] pr-review-toolkit ran
+     [x/skip] tests passing
+     [x/skip] pushed + PR opened
+     ```
+     Mark each as `x` (done) or `skip` (with reason). This makes skipped steps visible to the user.
 
 ### Quality gates
 
 The main agent checks every one of these after each agent delivers code. All must pass before committing.
 
+- [ ] Test runner exists — if no test framework is configured (no `pytest`, `jest`, `vitest`, `go test`, etc.), stop and ask the user whether to add one before proceeding. Do not silently pass this gate when there are zero tests.
 - [ ] All tests passing
 - [ ] Each commit is **100 lines of hand-written implementation code max** (tests, migrations, config, and generated code excluded) — if more, split into smaller iterations
 - [ ] If the project has coverage tooling configured, run it and verify coverage meets the project's threshold. If no coverage tooling exists, skip this gate.
