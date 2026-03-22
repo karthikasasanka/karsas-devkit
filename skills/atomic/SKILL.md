@@ -22,13 +22,14 @@ print(f'description: {row[2]}')
 "
 ```
 - If the task status is `done`, stop and tell the user it's already completed.
+- If the task status is `in_progress`, warn the user it was previously started and ask whether to resume or restart before continuing.
 - If found, use `title` + `description` as the task definition for all steps below.
 - Mark it `in_progress` immediately:
   ```
   uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('in_progress', $ARGUMENTS)); conn.commit(); conn.close()"
   ```
 
-**If text** — use `$ARGUMENTS` directly as the task definition.
+**If text** — use `$ARGUMENTS` directly as the task definition. If the description is large, vague, or contains multiple concerns (e.g. "build a user auth system"), stop and suggest running the **atomize** skill first to break it down before proceeding.
 
 ---
 
@@ -48,9 +49,17 @@ Before doing anything, scan the task for missing technical decisions. Ask about 
 
 Only ask about what's relevant to the task. Do not proceed until all relevant unknowns are answered.
 
+If the task came from a numeric ID (Step 0), skip questions already answered in the task description — do not ask again.
+
 ---
 
 ## Step 2 — Create a feature branch
+
+Check for uncommitted changes first:
+```
+git status --short
+```
+If there are uncommitted changes, stop and ask the user to commit or stash them before continuing. Do not carry unintended changes onto a new branch.
 
 Check the current branch:
 ```
@@ -100,6 +109,7 @@ Generate a `PROJECT_STRUCTURE.md` that shows the minimal base structure for the 
 - After the user confirms and files are created: run `git init .` **in the current working directory** (never inside a subfolder), create `.gitignore` and `.dockerignore`, then commit immediately with: `init: base project structure`
 - Always add `.devkit/` to `.gitignore` — it contains task automation files that must not be committed
 - Never assume any runtime, compiler, or toolchain is installed on the user's machine. Always use Docker to build and run. Include a `Dockerfile` in the project structure.
+- After the initial commit, proceed to [Atomic Dev Loop](#atomic-dev-loop) to implement the first function.
 
 ### What the starter example should describe (not code)
 
@@ -263,3 +273,16 @@ Do not silently assume. Stop and ask when:
 - The happy path requires a decision that has tradeoffs (e.g., sync vs async, in-memory vs persisted)
 
 One short question is better than a wrong implementation.
+
+---
+
+## When the task is complete
+
+Once all functions are implemented, tests are green, and commits are made:
+
+1. Push the feature branch:
+   ```
+   git push -u origin <branch-name>
+   ```
+2. Open a pull request against `main`/`master` and summarize what was implemented.
+3. If the task came from a numeric ID, confirm it is marked `done` in `.devkit/tasks.db` before closing.
