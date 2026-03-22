@@ -1,6 +1,6 @@
 ---
 name: atomic
-description: Atomic development workflow — scaffold structure or write one function, test it, commit if green, fix if red. Use this whenever someone wants to implement a feature, add a function, write code incrementally, scaffold a new project, or follow a TDD dev loop.
+description: Atomic development workflow — write one function, test it, commit if green, fix if red. Use this whenever someone wants to implement a feature, add a function, write code incrementally, or follow a TDD dev loop.
 argument-hint: "[task description] or [task id]"
 ---
 
@@ -11,7 +11,9 @@ Check if `$ARGUMENTS` is a numeric ID or a text prompt:
 **If numeric** — look up the task from `.devkit/tasks.db`:
 ```
 uv run python -c "
-import sqlite3
+import sqlite3, os
+if not os.path.exists('.devkit/tasks.db'):
+    raise SystemExit('.devkit/tasks.db not found — run the atomize skill first to create tasks')
 conn = sqlite3.connect('.devkit/tasks.db')
 row = conn.execute('SELECT id, title, description, status FROM tasks WHERE id = ?', ($ARGUMENTS,)).fetchone()
 conn.close()
@@ -22,34 +24,36 @@ print(f'description: {row[2]}')
 "
 ```
 - If the task status is `done`, stop and tell the user it's already completed.
-- If the task status is `in_progress`, warn the user it was previously started and ask whether to resume or restart before continuing.
-- If found, use `title` + `description` as the task definition for all steps below.
-- Mark it `in_progress` immediately:
-  ```
-  uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('in_progress', $ARGUMENTS)); conn.commit(); conn.close()"
-  ```
+- If the task status is `in_progress`, warn the user it was previously started and ask whether to resume or restart.
+  - **Resume** — continue from Step 1 using the existing branch and state.
+  - **Restart** — ask the user for confirmation, then delete the old feature branch, reset the task status to `pending`, and continue from Step 2 as if starting fresh.
+- If found, use `title` + `description` as the resolved task definition for all steps below.
 
-**If text** — use `$ARGUMENTS` directly as the task definition. If the description is large, vague, or contains multiple concerns (e.g. "build a user auth system"), stop and suggest running the **atomize** skill first to break it down before proceeding.
+**If text** — use `$ARGUMENTS` directly as the task definition.
+
+- If the text references an external issue tracker (Jira, GitHub Issues, Linear), fetch the issue details first and use the issue title + description as the task definition.
+
+**After resolving the task (both paths):**
+
+- If the resolved task description contains more than 2 distinct deliverables, touches more than 3 files, or is too vague to implement in a single focused loop, stop and suggest running the **atomize** skill first to break it down before proceeding.
+- If the task is ambiguous about language, framework, or key technical decisions (e.g., "add a login endpoint" without specifying the stack), ask the user to clarify before proceeding. Do not assume.
 
 ---
 
-Task: $ARGUMENTS
+## Step 1 — Route by task type
 
----
+Before writing any code, classify the task and check these routing rules. Apply all that match:
 
-## Step 1 — Clarify unknowns
+- **If the working directory has no source code** — ask the user about project setup (language, framework, structure) before proceeding.
+- **If the task involves frontend UI/UX design** — invoke the **frontend-design:frontend-design** skill for design decisions (layout, styling, visuals), then **feature-dev:feature-dev** for implementation.
+- **If the task modifies existing application code** — invoke the **feature-dev:feature-dev** skill to understand the codebase and architecture before implementing.
+- **If the task is backend-only** (e.g., REST endpoint, service logic, data layer) — invoke **feature-dev:feature-dev** for implementation.
+- **If the task is a worker/job** (e.g., background processor, cron job, queue consumer) — invoke **feature-dev:feature-dev** for implementation.
+- **If the task is infrastructure** (e.g., Dockerfiles, CI/CD, deploy config) — invoke **feature-dev:feature-dev** for implementation.
+- **If the task is full-stack** (frontend + backend) — invoke **feature-dev:feature-dev** for backend first, then **frontend-design:frontend-design** for UI design, then **feature-dev:feature-dev** for frontend implementation.
+- **If the task involves a library or third-party package** — use the **context7** MCP tools (`resolve-library-id` then `query-docs`) to fetch up-to-date documentation before writing any code.
 
-Before doing anything, scan the task for missing technical decisions. Ask about **all** that are unspecified in a single grouped question — do not assume any of them:
-
-- **Language / framework** — e.g. Python/FastAPI, Node/Express, Go
-- **Database** — e.g. SQLite, Postgres, in-memory (only if relevant)
-- **Auth mechanism** — e.g. JWT, sessions (only if auth is involved)
-- **Testing** — should tests be included? If yes, which framework?
-- **API style** — REST, GraphQL, RPC (only if an API is being built)
-
-Only ask about what's relevant to the task. Do not proceed until all relevant unknowns are answered.
-
-If the task came from a numeric ID (Step 0), skip questions already answered in the task description — do not ask again.
+These are mandatory checks, not optional.
 
 ---
 
@@ -66,11 +70,17 @@ Check the current branch:
 git branch --show-current
 ```
 
-If already on a feature branch (not `main` or `master`), continue on it.
+If already on a feature branch (not `main`, `master`, `develop`, or `trunk`), ask the user whether to continue on it or create a new branch. Do not silently continue on a potentially unrelated branch.
 
-If on `main` or `master`, derive a branch name from the task title — lowercase, hyphenated, no special chars — and create it:
+If on a trunk branch (`main`, `master`, `develop`, or `trunk`), derive a branch name from the task title — prefix with `feat/`, lowercase, hyphenated, no special chars — and create it:
 ```
-git checkout -b <branch-name>
+git checkout -b feat/<branch-name>
+```
+If the branch already exists, ask the user whether to switch to it or choose a different name.
+
+If the task came from a numeric ID, mark it `in_progress` now that the branch is ready:
+```
+uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('in_progress', $ARGUMENTS)); conn.commit(); conn.close()"
 ```
 
 Examples:
@@ -80,124 +90,91 @@ Examples:
 
 ---
 
-## Step 3 — Check for existing code
+## Implementation — Agent Delegation
 
-Scan the current directory for source files. Two paths:
+The main agent orchestrates, verifies, and enforces quality. Prefer delegating implementation to specialized agents rather than writing code directly.
 
-- **No code exists** → go to [Bootstrap](#bootstrap)
-- **Code exists** → go to [Atomic Dev Loop](#atomic-dev-loop)
+### Agent roster
 
----
+| Task type | Agent/Skill | Purpose |
+|-----------|------------|---------|
+| Backend / general code | **feature-dev:feature-dev** | Codebase understanding + implementation |
+| Frontend code | **feature-dev:feature-dev** | Frontend implementation (components, hooks, pages) |
+| Frontend UI/UX design | **frontend-design:frontend-design** | UI design, layout, styling, visual decisions |
+| Library/package usage | **context7** MCP tools | Fetch up-to-date docs before any agent writes code |
+| Infrastructure/deploy | **feature-dev:feature-dev** | Dockerfiles, CI/CD, infrastructure config |
+| Code quality | **code-review:code-review** | Review each iteration's output |
+| Post-commit cleanup | **simplify** | Review changed code for reuse, quality, efficiency |
+| Pre-push review | **pr-review-toolkit:review-pr** | Comprehensive PR review before pushing |
 
-## Bootstrap
+### Agent collaboration
 
-Generate a `PROJECT_STRUCTURE.md` that shows the minimal base structure for the framework or library mentioned in the task.
+Agents collaborate directly in a pipeline — each agent's output feeds into the next. The main agent checks quality gates after the pipeline completes.
 
-### What to include
+**Frontend task** (e.g., build a dashboard page):
+1. **context7** → fetch framework/library docs
+2. **frontend-design:frontend-design** → produce UI/UX design (layout, styling, visuals)
+3. **feature-dev:feature-dev** → implement components, hooks, pages based on the design
+4. **code-review:code-review** → review the implementation
 
-- **Tree layout** — folders and files only, no implementation
-- **File responsibilities** — one line per file describing its sole purpose
-- **Dependencies** — minimal list for the project's package manager file (e.g., `pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`, `pom.xml`)
-- **One concrete starter example** — described in plain text: what the entry point is, what it does, what a minimal first route/command/handler looks like
+**Backend task** (e.g., add a REST endpoint):
+1. **context7** → fetch library/framework docs
+2. **feature-dev:feature-dev** → implement route, service logic, data layer
+3. **code-review:code-review** → review the implementation
 
-### Rules
+**Worker/job task** (e.g., background email sender, cron job):
+1. **context7** → fetch docs for queue/scheduler libraries
+2. **feature-dev:feature-dev** → implement the worker logic, retry handling, scheduling
+3. **code-review:code-review** → review the implementation
 
-- Only include files that are necessary to start. No `utils`, no `helpers`, no base classes unless the framework requires them.
-- Do not write code in the structure doc. Describe intent in plain text.
-- Do not create the actual files. Write the markdown only.
-- Stop and ask the user to confirm the structure before doing anything else.
-- After the user confirms and files are created: run `git init .` **in the current working directory** (never inside a subfolder), create `.gitignore` and `.dockerignore`, then commit immediately with: `init: base project structure`
-- Always add `.devkit/` to `.gitignore` — it contains task automation files that must not be committed
-- Never assume any runtime, compiler, or toolchain is installed on the user's machine. Always use Docker to build and run. Include a `Dockerfile` in the project structure.
-- After the initial commit, proceed to [Atomic Dev Loop](#atomic-dev-loop) to implement the first function.
+**Infrastructure task** (e.g., add Docker setup, CI/CD pipeline):
+1. **feature-dev:feature-dev** → create Dockerfiles, compose files, CI config
+2. **code-review:code-review** → review the configuration
 
-### What the starter example should describe (not code)
+**Full-stack task** (e.g., user profile page with API):
+1. **context7** → fetch docs for both frontend and backend libraries
+2. **feature-dev:feature-dev** → implement backend API first
+3. **frontend-design:frontend-design** → produce UI/UX design for the frontend
+4. **feature-dev:feature-dev** → implement frontend based on the design, wired to the API
+5. **code-review:code-review** → review the full stack
 
-Instead of writing actual code, describe:
-- The entry point file and its role
-- The first working endpoint, command, or handler — what it accepts and what it returns
-- How to run it locally
-
-Example description for a REST API:
-> Entry point: `main` file in the project root. Registers a single health route at `GET /health` that returns `{ status: ok }`. Run with the framework's dev server command.
-
-Example description for a CLI tool:
-> Entry point: `main` file. Registers one command `hello` that prints a greeting to stdout. Run with `<runtime> run hello`.
-
-### Antipatterns to avoid in bootstrap
-
-| Antipattern | Why it's wrong |
-|---|---|
-| Adding `utils` or `helpers` upfront | You don't know what's shared yet |
-| Creating a `base` or `core` folder | Premature abstraction |
-| Adding auth, logging, or middleware before the first working route | Build one thing first |
-| More than one starter example | Increases ambiguity, not clarity |
-| Generating actual files without asking | User may want to adjust the structure first |
-| Writing code instead of describing it | Structure doc should be readable, not runnable |
-| Omitting a Dockerfile | Never assume the user has runtimes installed locally — Docker is always required |
-| Running tests without Docker | Use containers; do not rely on locally installed tools |
-
----
-
-## Minimal Working Code
-
-"Minimal working" means: the function passes its tests and handles only the cases stated in the task. Nothing more.
-
-### What to include
-
-- The logic needed to satisfy the task
-- Imports that are actually used
-- Error handling only for cases that genuinely can't be handled (e.g., missing required input)
-
-### What to omit unless explicitly asked
-
-| Omit | Unless |
-|---|---|
-| Inline documentation / docstrings / JSDoc | User asks for documentation |
-| Type annotations / type hints | Project already uses them consistently |
-| Logging statements | User asks for observability |
-| Exception catching / try-catch | The function can genuinely fail in a recoverable way |
-| Config or environment variable loading | The function needs external config to work |
-| Abstract base classes or interfaces | There are already 2+ concrete implementations |
-| Module re-exports | The module is a published package |
-| Inline comments | The logic is genuinely non-obvious |
-
-### Before writing, read first
-
-If code already exists:
-1. Read 1-2 similar functions in the codebase to understand the existing style
-2. Match it — same naming convention, same error handling pattern, same file organization
-3. Do not introduce a new pattern if one already exists
-
-If the task involves a library or third-party package, use the **context7** MCP tool to fetch up-to-date documentation before writing any code.
-
-If the task involves frontend UI, use the **frontend-design** skill instead of writing UI code directly.
-
-### Definition of done
-
-A function is done when:
-- [ ] Tests are green
-- [ ] It is committed with a focused message
-- [ ] Nothing extra was added (no unused imports, no dead code, no stubs)
-
-If any of these are not true, you are not done.
+Agents must complete in order — later agents depend on earlier agents' output. For example, **feature-dev:feature-dev** must not start coding until **frontend-design:frontend-design** has finalized the design. Pick the pipeline that matches the task type.
 
 ---
 
 ## Atomic Dev Loop
 
-Follow this loop strictly. One function per iteration, one commit per green test. Use the **feature-dev** skill to guide understanding of the codebase and architecture before implementing each step.
+One logical unit per iteration, one commit per green test. The main agent orchestrates.
 
 ### The loop
 
-1. **Write one function** — the smallest unit that satisfies the task. No helpers, no extras alongside it. See [Minimal Working Code](#minimal-working-code) for what to include and omit.
-2. **Write tests** — cover the happy path and one meaningful edge case. Keep tests short.
-3. **Run the tests** — execute them immediately using Docker. Do not assume the user has any runtime or toolchain installed locally. Use `docker build` and `docker run` (or `docker compose`) to run tests in a container.
-4. **If green** — commit with a single focused message. If the task came from a numeric ID, also mark it done:
-   ```
-   uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('done', <id>)); conn.commit(); conn.close()"
-   ```
-5. **If red** — diagnose the failure, fix the function or the test (whichever is wrong), return to step 3.
+1. **Delegate** — trigger the agent pipeline based on Step 1 routing. Agents collaborate directly — each agent's output feeds into the next. Pass the task context and any prior fix feedback to the first agent in the pipeline.
+2. **Verify** — main agent checks the agent's output against all [quality gates](#quality-gates).
+3. **If all gates pass** — commit with a focused message, then run the **simplify** skill on the changed code. If simplify produces changes, commit them with message `refactor: simplify <what changed>`.
+4. **If any gate fails** — identify which gate(s) failed and send specific failure details back to the responsible subagent for fixes. Max **3 fix cycles** per iteration — if still failing after 3 attempts, stop and ask the user.
+5. **Repeat** until the task is complete.
+6. **Finalize** — once all iterations are done:
+   - If the task came from a numeric ID, mark it `done`:
+     ```
+     uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('done', <id>)); conn.commit(); conn.close()"
+     ```
+   - Run **pr-review-toolkit:review-pr** for a comprehensive review. If issues found, send back to agents for fixes.
+   - **Ask the user for confirmation** before pushing and opening a PR.
+   - If confirmed, push the feature branch: `git push -u origin <branch-name>`
+   - Open a pull request against the trunk branch and summarize what was implemented. If the task references an external issue (Jira, GitHub Issues, Linear), include the issue key in the PR title (e.g., `PL-2: add user login endpoint`).
+
+### Quality gates
+
+The main agent checks every one of these after each agent delivers code. All must pass before committing.
+
+- [ ] All tests passing
+- [ ] Each commit is **100 lines of hand-written implementation code max** (tests, migrations, config, and generated code excluded) — if more, split into smaller iterations
+- [ ] If the project has coverage tooling configured, run it and verify coverage meets the project's threshold. If no coverage tooling exists, skip this gate.
+- [ ] No dead code, unused imports, or stubs (run the project's linter if configured)
+- [ ] No unrelated changes in the diff
+- [ ] Follows existing codebase patterns and conventions
+- [ ] No hardcoded secrets or credentials
+- [ ] Functions are independently testable (single responsibility)
 
 ### Commit message format
 
@@ -211,9 +188,11 @@ Examples:
 - `fix: handle empty list in paginate`
 - `add: create order with default status`
 
-### What counts as "one function"
+---
 
-A function is one named, testable unit. It does one thing.
+## What counts as "one function"
+
+A function is one named, testable unit. It does one thing. A logical unit is a coherent set of functions that can be tested as a group without depending on uncommitted code.
 
 Good — each is independently testable:
 - `getUser(id)` — fetches a user by id
@@ -221,68 +200,8 @@ Good — each is independently testable:
 - `sendWelcomeEmail(user)` — sends a welcome email
 
 Bad — too broad, split these:
-- A create-user function that hashes a password, inserts to DB, and sends email — that's three functions
-- A process-order function that validates, calculates, and saves — split it
+- `setupAuth()` — does too many things (hashing, tokens, middleware)
+- `handleRequest()` — reads input, validates, queries DB, formats response
+- `initApp()` — wires everything together, not a single unit
 
-### What good tests look like
-
-Tests should be:
-- One assertion per test case
-- Named to describe the scenario, not the implementation
-- Independent — no shared mutable state between tests
-
-Good:
-- `test that getUser returns the correct user for a valid id`
-- `test that getUser throws a not-found error for an unknown id`
-
-Bad:
-- A single test that calls create, then get, then checks email was sent — that's three tests
-- A test named `test user stuff` or `test it works`
-- An assertion that only checks the result is not null — that's too weak
-
-### Antipatterns to avoid in the loop
-
-| Antipattern | Why it's wrong |
-|---|---|
-| Writing two functions before testing | You lose isolation — hard to tell which one broke |
-| Skipping tests because "it's simple" | Simple functions break too; tests also document intent |
-| Fixing a failing test by weakening the assertion | The test is telling you something. Listen to it. |
-| Committing with all tests in one go | Each commit should be independently meaningful |
-| Adding error handling for cases that can't happen | Defensive code that's never tested is noise |
-| Refactoring while the loop is running | Finish the function first, refactor in a separate commit |
-| Writing a helper before it's needed | Write it when the second function needs it, not the first |
-
-### When tests keep failing
-
-1. Re-read the function — is it actually doing what you think?
-2. Add a temporary debug output mid-function to verify state
-3. Check if the test setup is wrong (wrong fixture, wrong mock, wrong input)
-4. Do not retry the same fix more than twice — step back and rethink the approach
-5. Do not move on with a skipped or commented-out test
-
----
-
-## When to stop and ask the user
-
-Do not silently assume. Stop and ask when:
-
-- The task is ambiguous about what the function should return
-- It's unclear whether to throw an error or return a default value
-- The task would require touching more than one existing file
-- A dependency is not already in the project and you're about to add it
-- The happy path requires a decision that has tradeoffs (e.g., sync vs async, in-memory vs persisted)
-
-One short question is better than a wrong implementation.
-
----
-
-## When the task is complete
-
-Once all functions are implemented, tests are green, and commits are made:
-
-1. Push the feature branch:
-   ```
-   git push -u origin <branch-name>
-   ```
-2. Open a pull request against `main`/`master` and summarize what was implemented.
-3. If the task came from a numeric ID, confirm it is marked `done` in `.devkit/tasks.db` before closing.
+When related functions must exist together to be testable (e.g., a route handler and its request validation schema), they count as one logical unit and can be committed together.
