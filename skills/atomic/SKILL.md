@@ -36,7 +36,21 @@ Task: $ARGUMENTS
 
 ---
 
-## Step 1 — Create a feature branch
+## Step 1 — Clarify unknowns
+
+Before doing anything, scan the task for missing technical decisions. Ask about **all** that are unspecified in a single grouped question — do not assume any of them:
+
+- **Language / framework** — e.g. Python/FastAPI, Node/Express, Go
+- **Database** — e.g. SQLite, Postgres, in-memory (only if relevant)
+- **Auth mechanism** — e.g. JWT, sessions (only if auth is involved)
+- **Testing** — should tests be included? If yes, which framework?
+- **API style** — REST, GraphQL, RPC (only if an API is being built)
+
+Only ask about what's relevant to the task. Do not proceed until all relevant unknowns are answered.
+
+---
+
+## Step 2 — Create a feature branch
 
 Check the current branch:
 ```
@@ -57,7 +71,7 @@ Examples:
 
 ---
 
-## Step 2 — Check for existing code
+## Step 3 — Check for existing code
 
 Scan the current directory for source files. Two paths:
 
@@ -145,6 +159,10 @@ If code already exists:
 2. Match it — same naming convention, same error handling pattern, same file organization
 3. Do not introduce a new pattern if one already exists
 
+If the task involves a library or third-party package, use the **context7** MCP tool to fetch up-to-date documentation before writing any code.
+
+If the task involves frontend UI, use the **frontend-design** skill instead of writing UI code directly.
+
 ### Definition of done
 
 A function is done when:
@@ -158,11 +176,11 @@ If any of these are not true, you are not done.
 
 ## Atomic Dev Loop
 
-Follow this loop strictly. One function per iteration, one commit per green test.
+Follow this loop strictly. One function per iteration, one commit per green test. Use the **feature-dev** skill to guide understanding of the codebase and architecture before implementing each step.
 
 ### The loop
 
-1. **Write one function** — the smallest unit that satisfies the task. No helpers, no extras alongside it.
+1. **Write one function** — the smallest unit that satisfies the task. No helpers, no extras alongside it. See [Minimal Working Code](#minimal-working-code) for what to include and omit.
 2. **Write tests** — cover the happy path and one meaningful edge case. Keep tests short.
 3. **Run the tests** — execute them immediately using Docker. Do not assume the user has any runtime or toolchain installed locally. Use `docker build` and `docker run` (or `docker compose`) to run tests in a container.
 4. **If green** — commit with a single focused message. If the task came from a numeric ID, also mark it done:
