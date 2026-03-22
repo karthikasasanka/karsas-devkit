@@ -41,7 +41,7 @@ Output this as a short paragraph before proceeding.
 Split the task into atomic units. Each atomic task must:
 - Start with a single action verb (add, create, write, configure, update, delete)
 - Do exactly one thing — touches one file or one concern
-- Match the `atomic` skill's definition: one named, testable unit
+- Match the `atomic` skill's definition of one named, testable unit — see [What counts as "one function"](../atomic/SKILL.md#what-counts-as-one-function)
 - Have a short `title` (5–8 words) and a one-sentence `description`
 - Be assigned an `exec_order` (1, 2, 3...) reflecting dependency order
 

@@ -22,13 +22,14 @@ print(f'description: {row[2]}')
 "
 ```
 - If the task status is `done`, stop and tell the user it's already completed.
+- If the task status is `in_progress`, warn the user it was previously started and ask whether to resume or restart before continuing.
 - If found, use `title` + `description` as the task definition for all steps below.
 - Mark it `in_progress` immediately:
   ```
   uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('in_progress', $ARGUMENTS)); conn.commit(); conn.close()"
   ```
 
-**If text** — use `$ARGUMENTS` directly as the task definition.
+**If text** — use `$ARGUMENTS` directly as the task definition. If the description is large, vague, or contains multiple concerns (e.g. "build a user auth system"), stop and suggest running the **atomize** skill first to break it down before proceeding.
 
 ---
 
@@ -36,7 +37,29 @@ Task: $ARGUMENTS
 
 ---
 
-## Step 1 — Create a feature branch
+## Step 1 — Clarify unknowns
+
+Before doing anything, scan the task for missing technical decisions. Ask about **all** that are unspecified in a single grouped question — do not assume any of them:
+
+- **Language / framework** — e.g. Python/FastAPI, Node/Express, Go
+- **Database** — e.g. SQLite, Postgres, in-memory (only if relevant)
+- **Auth mechanism** — e.g. JWT, sessions (only if auth is involved)
+- **Testing** — should tests be included? If yes, which framework?
+- **API style** — REST, GraphQL, RPC (only if an API is being built)
+
+Only ask about what's relevant to the task. Do not proceed until all relevant unknowns are answered.
+
+If the task came from a numeric ID (Step 0), skip questions already answered in the task description — do not ask again.
+
+---
+
+## Step 2 — Create a feature branch
+
+Check for uncommitted changes first:
+```
+git status --short
+```
+If there are uncommitted changes, stop and ask the user to commit or stash them before continuing. Do not carry unintended changes onto a new branch.
 
 Check the current branch:
 ```
@@ -57,7 +80,7 @@ Examples:
 
 ---
 
-## Step 2 — Check for existing code
+## Step 3 — Check for existing code
 
 Scan the current directory for source files. Two paths:
 
@@ -86,6 +109,7 @@ Generate a `PROJECT_STRUCTURE.md` that shows the minimal base structure for the 
 - After the user confirms and files are created: run `git init .` **in the current working directory** (never inside a subfolder), create `.gitignore` and `.dockerignore`, then commit immediately with: `init: base project structure`
 - Always add `.devkit/` to `.gitignore` — it contains task automation files that must not be committed
 - Never assume any runtime, compiler, or toolchain is installed on the user's machine. Always use Docker to build and run. Include a `Dockerfile` in the project structure.
+- After the initial commit, proceed to [Atomic Dev Loop](#atomic-dev-loop) to implement the first function.
 
 ### What the starter example should describe (not code)
 
@@ -145,6 +169,10 @@ If code already exists:
 2. Match it — same naming convention, same error handling pattern, same file organization
 3. Do not introduce a new pattern if one already exists
 
+If the task involves a library or third-party package, use the **context7** MCP tool to fetch up-to-date documentation before writing any code.
+
+If the task involves frontend UI, use the **frontend-design** skill instead of writing UI code directly.
+
 ### Definition of done
 
 A function is done when:
@@ -158,11 +186,11 @@ If any of these are not true, you are not done.
 
 ## Atomic Dev Loop
 
-Follow this loop strictly. One function per iteration, one commit per green test.
+Follow this loop strictly. One function per iteration, one commit per green test. Use the **feature-dev** skill to guide understanding of the codebase and architecture before implementing each step.
 
 ### The loop
 
-1. **Write one function** — the smallest unit that satisfies the task. No helpers, no extras alongside it.
+1. **Write one function** — the smallest unit that satisfies the task. No helpers, no extras alongside it. See [Minimal Working Code](#minimal-working-code) for what to include and omit.
 2. **Write tests** — cover the happy path and one meaningful edge case. Keep tests short.
 3. **Run the tests** — execute them immediately using Docker. Do not assume the user has any runtime or toolchain installed locally. Use `docker build` and `docker run` (or `docker compose`) to run tests in a container.
 4. **If green** — commit with a single focused message. If the task came from a numeric ID, also mark it done:
@@ -245,3 +273,16 @@ Do not silently assume. Stop and ask when:
 - The happy path requires a decision that has tradeoffs (e.g., sync vs async, in-memory vs persisted)
 
 One short question is better than a wrong implementation.
+
+---
+
+## When the task is complete
+
+Once all functions are implemented, tests are green, and commits are made:
+
+1. Push the feature branch:
+   ```
+   git push -u origin <branch-name>
+   ```
+2. Open a pull request against `main`/`master` and summarize what was implemented.
+3. If the task came from a numeric ID, confirm it is marked `done` in `.devkit/tasks.db` before closing.
