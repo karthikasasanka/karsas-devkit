@@ -17,8 +17,13 @@ Before elaborating, scan the prompt for any missing technical decisions. Ask abo
 - **Auth mechanism** — e.g. JWT, sessions, OAuth (only if auth is relevant to the task)
 - **Testing** — should tests be included? If yes, which framework?
 - **API style** — REST, GraphQL, RPC (only if an API is being built)
+- **Styling approach** — e.g. Tailwind, CSS Modules, styled-components (only if frontend is involved)
+- **Component library** — e.g. shadcn/ui, MUI, Radix (only if frontend is involved)
+- **State management** — e.g. React Context, Zustand, Redux (only if frontend is involved)
 
 Only ask about what's actually relevant to the task. Skip questions that don't apply.
+
+If the task references an external issue tracker (Jira, GitHub Issues, Linear), fetch the issue details first and use the issue title + description as the task definition before proceeding.
 
 Do not proceed until all relevant unknowns are answered.
 
@@ -32,7 +37,7 @@ Restate the original prompt as a detailed description:
 - Identify any unknowns that would need resolving before implementation
 - Define what "done" looks like
 
-Output this as a short paragraph before proceeding.
+Output this as a short paragraph and show it to the user for confirmation before proceeding. If the user has corrections, incorporate them and re-confirm. Do not proceed to decomposition until the user agrees the elaboration is accurate.
 
 ---
 
@@ -42,7 +47,7 @@ Split the task into atomic units. Each atomic task must:
 - Start with a single action verb (add, create, write, configure, update, delete)
 - Do exactly one thing — touches one file or one concern
 - Match the `atomic` skill's definition of one named, testable unit — see [What counts as "one function"](../atomic/SKILL.md#what-counts-as-one-function)
-- Have a short `title` (5–8 words) and a one-sentence `description`
+- Have a short `title` (5-8 words) and a one-sentence `description`
 - Be assigned an `exec_order` (1, 2, 3...) reflecting dependency order
 
 **Split any task that:**
@@ -51,14 +56,21 @@ Split the task into atomic units. Each atomic task must:
 - Is vague ("set up X", "handle Y") — break it into concrete actions
 - Would produce more than 100 lines of implementation code (tests excluded) — if you estimate it will exceed 100 lines, split it
 
-**Good atomic tasks:**
+**Good atomic tasks (backend):**
 - `create users table migration` — adds one schema migration file
 - `write get-user-by-id query` — one function, one SQL query
 - `add POST /users route handler` — one route, one handler function
 
+**Good atomic tasks (frontend):**
+- `create NDA form component` — captures user input for party details
+- `add document preview panel` — renders filled template in read-only view
+- `add PDF download button` — generates and downloads PDF from template
+- `create dashboard layout component` — page shell with sidebar and header
+
 **Bad (split these):**
 - `set up database and add user model` → two tasks
 - `implement auth` → too vague, split into: create JWT signing function, create token validation middleware, add login route handler
+- `build user profile page` → too broad, split into: create profile layout component, add avatar upload form, add user details display
 
 ---
 
@@ -73,6 +85,7 @@ import sqlite3, os, sys
 from datetime import datetime
 
 tasks = []  # populated below
+parent_prompt = ""  # set to the original user prompt
 
 db_dir = ".devkit"
 os.makedirs(db_dir, exist_ok=True)
@@ -88,6 +101,15 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )
 """)
+
+# Check for existing tasks with the same parent_prompt
+existing = conn.execute(
+    "SELECT COUNT(*) FROM tasks WHERE parent_prompt = ?", (parent_prompt,)
+).fetchone()[0]
+if existing > 0:
+    print(f"WARNING: {existing} tasks already exist for this prompt. Clearing them before re-inserting.")
+    conn.execute("DELETE FROM tasks WHERE parent_prompt = ?", (parent_prompt,))
+
 for t in tasks:
     conn.execute(
         "INSERT INTO tasks (parent_prompt, title, description, exec_order) VALUES (?, ?, ?, ?)",
@@ -116,6 +138,8 @@ print(f'{'ID':<5} {'Order':<7} {'Title':<45} Status')
 print('-' * 70)
 for r in rows:
     print(f'{r[0]:<5} {r[1]:<7} {r[2]:<45} {r[3]}')
+print()
+print(f'Total: {len(rows)} tasks')
 print()
 print('Use: /devkit:atomic <ID> to execute a task')
 "
