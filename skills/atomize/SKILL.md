@@ -16,16 +16,15 @@ If `$ARGUMENTS` references an external issue tracker (Jira key like `PL-2`, GitH
 
 Before elaborating, scan the working directory for project files (`pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`, existing source code) to infer technical decisions already made. Only ask the user about what cannot be inferred from the codebase.
 
-For any remaining unspecified decisions, ask about **all** that are relevant in a single grouped question — do not assume any of them:
+For any remaining unspecified decisions that affect how the task breaks down, ask about **all** that are relevant in a single grouped question — do not assume any of them:
 
 - **Language/framework** — e.g. Python/FastAPI, Node/Express, Go, etc.
 - **Database** — e.g. SQLite, Postgres, MongoDB, in-memory
 - **Auth mechanism** — e.g. JWT, sessions, OAuth (only if auth is relevant to the task)
 - **Testing** — should tests be included? If yes, which framework?
 - **API style** — REST, GraphQL, RPC (only if an API is being built)
-- **Styling approach** — e.g. Tailwind, CSS Modules, styled-components (only if frontend is involved)
-- **Component library** — e.g. shadcn/ui, MUI, Radix (only if frontend is involved)
-- **State management** — e.g. React Context, Zustand, Redux (only if frontend is involved)
+
+Only ask about decisions that change how the task decomposes. Implementation details like styling approach, component libraries, or state management belong in the execution phase — skip them here.
 
 Skip questions that don't apply. If nothing is unclear, proceed directly to Step 2.
 
@@ -38,7 +37,7 @@ Restate the original prompt as a detailed description:
 - List assumptions being made
 - Define what "done" looks like
 
-Output this as a short paragraph and show it to the user for confirmation before proceeding. If the user has corrections, incorporate them and re-confirm. After two rounds of correction without consensus, ask the user to restate the task from scratch.
+Output this as a short paragraph and show it to the user for confirmation before proceeding. If the user has corrections, incorporate them and re-confirm. If after a few rounds alignment still isn't converging, suggest the user restate the task in their own words — the original framing may be the problem.
 
 Do not proceed to decomposition until the user agrees the elaboration is accurate.
 
@@ -51,8 +50,10 @@ Split the task into atomic units. A function is one named, testable unit that do
 Each atomic task must:
 - Start with a single action verb (add, create, write, configure, update, delete)
 - Do exactly one thing — touches one file or one concern
-- Have a short `title` (3-8 words) and a one-sentence `description`
+- Have a short `title` (3-8 words) and a one-sentence `description` that says **what gets created and where** (target file, function name, or endpoint — enough for someone to implement it without re-reading the original prompt)
 - Be assigned an `exec_order` (1, 2, 3...) reflecting dependency order
+
+**Do not create separate test tasks.** The atomic skill (`/devkit:atomic`) already writes and runs tests as part of its own dev loop. Creating "write test for X" tasks leads to redundant work.
 
 **Split any task that:**
 - Contains "and" — it's two tasks
@@ -60,7 +61,9 @@ Each atomic task must:
 - Is vague ("set up X", "handle Y") — break it into concrete actions
 - Would produce more than 100 lines of implementation code (tests excluded) — if you estimate it will exceed 100 lines, split it
 
-If decomposition yields only one task, tell the user the task is already atomic and suggest running `/devkit:atomic <description>` directly instead of saving to the DB.
+If decomposition yields only one task, tell the user the task is already atomic. Offer two options: run `/devkit:atomic <description>` directly, or save it to the DB if they want it tracked.
+
+If decomposition yields more than 20 tasks, the original prompt is likely too broad for a single decomposition. Suggest splitting it into 2-3 high-level milestones and running atomize on each one separately.
 
 **Good atomic tasks (backend):**
 - `create users table migration` — adds one schema migration file
@@ -77,6 +80,8 @@ If decomposition yields only one task, tell the user the task is already atomic 
 - `set up database and add user model` — two tasks
 - `implement auth` — too vague, split into: create JWT signing function, create token validation middleware, add login route handler
 - `build user profile page` — too broad, split into: create profile layout component, add avatar upload form, add user details display
+
+**Completeness check** — before saving, review the task list against the elaboration from Step 2. Every aspect of "done" must map to at least one task. If there's a gap, add the missing task(s). Show the final list to the user and get confirmation before proceeding.
 
 ---
 
@@ -148,28 +153,28 @@ Write this as `.devkit/save_tasks.py`, populate the `tasks` list and `parent_pro
 
 ## Step 5 — Display result
 
-After saving, run this exact query and print the table — do not summarize or reformat:
+After saving, run this exact query and print the table — do not summarize or reformat. Pass the same `parent_prompt` value used in Step 4 so only the current decomposition is shown:
 
 ```
 uv run python -c "
-import sqlite3, os
+import sqlite3, os, sys
 db_path = '.devkit/tasks.db'
 if not os.path.exists(db_path):
     print('ERROR: .devkit/tasks.db not found. Run atomize first.')
     raise SystemExit(1)
+parent_prompt = sys.argv[1]
 conn = sqlite3.connect(db_path)
-rows = conn.execute('SELECT id, exec_order, title, description, status FROM tasks ORDER BY exec_order').fetchall()
+rows = conn.execute('SELECT id, exec_order, title, status FROM tasks WHERE parent_prompt = ? ORDER BY exec_order', (parent_prompt,)).fetchall()
 conn.close()
-id_h, order_h, title_h, status_h = 'ID', 'Order', 'Title', 'Status'
-print(f'{id_h:<5} {order_h:<7} {title_h:<45} {status_h}')
+print(f'{"ID":<5} {"Order":<7} {"Title":<45} {"Status"}')
 print('-' * 70)
 for r in rows:
-    print(f'{r[0]:<5} {r[1]:<7} {r[2]:<45} {r[4]}')
+    print(f'{r[0]:<5} {r[1]:<7} {r[2]:<45} {r[3]}')
 print()
 print(f'Total: {len(rows)} tasks')
 print()
 print('Use: /devkit:atomic <ID> to execute a task')
-"
+" "the parent_prompt string from Step 4"
 ```
 
-The ID column is what the user passes to `/devkit:atomic`. Always show it.
+The ID column is what the user passes to `/devkit:atomic`. The atomic skill looks up the task by ID, reads its title and description, and uses them as the task definition for its dev loop.
