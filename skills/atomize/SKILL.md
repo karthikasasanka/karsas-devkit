@@ -47,23 +47,27 @@ Do not proceed to decomposition until the user agrees the elaboration is accurat
 
 Split the task into atomic units. A function is one named, testable unit that does one thing. When related functions must exist together to be testable (e.g., a route handler and its validation schema), they count as one logical unit.
 
-Each atomic task must:
+**No self-referential test tasks.** The `/devkit:atomic` skill already writes and runs tests as part of its own dev loop. Do not create tasks like "write tests for X" where X is another task in the same list — that's redundant work. Before saving, scan the list and remove any task that exists only to test an implementation task within the same decomposition.
+
+Exception: if the user's prompt is explicitly about testing (e.g., "write tests for the auth module", "add test coverage to the payments service"), then test tasks are the deliverable. In that case, decompose them the same way — one task per concern, one file or one module per task — by reading the existing codebase to understand what needs covering.
+
+Each implementation task must:
 - Start with a single action verb (add, create, write, configure, update, delete)
 - Do exactly one thing — touches one file or one concern
 - Have a short `title` (3-8 words) and a one-sentence `description` that says **what gets created and where** (target file, function name, or endpoint — enough for someone to implement it without re-reading the original prompt)
 - Be assigned an `exec_order` (1, 2, 3...) reflecting dependency order
 
-**Do not create separate test tasks.** The atomic skill (`/devkit:atomic`) already writes and runs tests as part of its own dev loop. Creating "write test for X" tasks leads to redundant work.
-
 **Split any task that:**
 - Contains "and" — it's two tasks
 - Touches more than one file or layer
 - Is vague ("set up X", "handle Y") — break it into concrete actions
-- Would produce more than 100 lines of implementation code (tests excluded) — if you estimate it will exceed 100 lines, split it
+- Would produce more than 100 lines of implementation code — if you estimate it will exceed 100 lines, split it
 
 If decomposition yields only one task, tell the user the task is already atomic. Offer two options: run `/devkit:atomic <description>` directly, or save it to the DB if they want it tracked.
 
 If decomposition yields more than 20 tasks, the original prompt is likely too broad for a single decomposition. Suggest splitting it into 2-3 high-level milestones and running atomize on each one separately.
+
+**Right granularity for frontend tasks** — frontend tasks should be component-level, not function-level. A form with three fields is one task ("create user settings form"), not three tasks (one per field). Think about what a developer would build in one sitting as a single reviewable unit: a component, a page section, an API call hook, a layout. Don't decompose inside a component unless it's genuinely large (would exceed 100 lines).
 
 **Good atomic tasks (backend):**
 - `create users table migration` — adds one schema migration file
@@ -71,7 +75,7 @@ If decomposition yields more than 20 tasks, the original prompt is likely too br
 - `add POST /users route handler` — one route, one handler function
 
 **Good atomic tasks (frontend):**
-- `create NDA form component` — captures user input for party details
+- `create user settings form` — form with display name, email, and avatar fields
 - `add document preview panel` — renders filled template in read-only view
 - `add PDF download button` — generates and downloads PDF from template
 - `create dashboard layout component` — page shell with sidebar and header
@@ -81,7 +85,11 @@ If decomposition yields more than 20 tasks, the original prompt is likely too br
 - `implement auth` — too vague, split into: create JWT signing function, create token validation middleware, add login route handler
 - `build user profile page` — too broad, split into: create profile layout component, add avatar upload form, add user details display
 
-**Completeness check** — before saving, review the task list against the elaboration from Step 2. Every aspect of "done" must map to at least one task. If there's a gap, add the missing task(s). Show the final list to the user and get confirmation before proceeding.
+**Bad (too granular for frontend):**
+- `create display name input field` — this belongs inside a settings form component, not its own task
+- `write handleSubmit function` — internal implementation detail, not an atomic deliverable
+
+**Completeness check** — before saving, do two things: (1) verify every aspect of "done" from Step 2 maps to at least one task, adding any gaps; (2) scan the list and remove any test tasks. Show the final list to the user and get confirmation before proceeding.
 
 ---
 
