@@ -25,7 +25,7 @@ print(f'description: {row[2]}')
 ```
 - If the task status is `done`, stop and tell the user it's already completed.
 - If the task status is `in_progress`, warn the user it was previously started and ask whether to resume or restart.
-  - **Resume** — continue from Step 1 using the existing branch and state.
+  - **Resume** — switch to the existing branch and continue from the last completed iteration in the dev loop.
   - **Restart** — ask the user for confirmation, then delete the old feature branch, reset the task status to `pending`, and continue from Step 2 as if starting fresh.
 - If found, use `title` + `description` as the resolved task definition for all steps below.
 
@@ -160,6 +160,16 @@ One logical unit per iteration, one commit per green test. The main agent orches
      ```
      uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('done', <id>)); conn.commit(); conn.close()"
      ```
+   - If `.devkit/tasks.md` exists, append a completion note. Use `git log origin/master..HEAD --stat` (substitute `master` with the actual trunk branch name if different) to scope the note to only commits in this task's branch — do not summarize the whole project. If the branch has never been pushed, use `git log HEAD --stat` scoped to commits since branching:
+     For numeric tasks use `## task-<id>: <title>`, for text tasks use `## task: <title>`:
+     ```markdown
+     ## task-<id>: <title>
+     - libraries: <packages added in this task, e.g. requests, pydantic — or "none">
+     - files: <files created or modified in this task, comma-separated>
+     - decisions: <key design choices made during this task>
+     - notes: <what a future session needs to know to continue or build on this specific task>
+     ```
+     Be specific and factual — write only what actually happened in this task's commits. Future sessions read this to understand what is already built without replaying git history.
    - Run **pr-review-toolkit:review-pr** for a comprehensive review. If issues found, send back to agents for fixes.
    - **Ask the user for confirmation** before pushing and opening a PR.
    - If confirmed, push the feature branch: `git push -u origin <branch-name>`
