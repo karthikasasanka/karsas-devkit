@@ -157,6 +157,24 @@ print(f"Saved {len(tasks)} tasks to .devkit/tasks.db")
 
 Write this as `.devkit/save_tasks.py`, populate the `tasks` list and `parent_prompt`, run it with `uv run python .devkit/save_tasks.py`, then delete it. If the script exits with a non-zero status, stop and show the error to the user. Do not proceed to Step 5. All automation files must stay inside `.devkit/` — never write temp scripts to the project root.
 
+After the script completes successfully, update `.devkit/tasks.md`:
+
+- **If tasks.md does not exist** — create it with a header section for this decomposition.
+- **If tasks.md already exists** — append a new section below the existing content (do not overwrite — prior completion notes from earlier tasks must be preserved).
+
+The header section format (use actual IDs from the DB, not the list index — query after saving):
+
+```
+# <first 80 chars of parent_prompt>
+
+| ID | Order | Title | Status |
+|----|-------|-------|--------|
+| 1  | 1     | create users table migration | pending |
+...
+```
+
+Fetch the actual IDs by querying the DB immediately after saving (use the same parent_prompt filter as Step 5). This file is the persistent context log — each completed task appends notes below these headers.
+
 ---
 
 ## Step 5 — Display result
@@ -182,7 +200,7 @@ print()
 print(f'Total: {len(rows)} tasks')
 print()
 print('Use: /devkit:atomic <ID> to execute a task')
-" "the parent_prompt string from Step 4"
+" "<the actual parent_prompt value from Step 4>"
 ```
 
 The ID column is what the user passes to `/devkit:atomic`. The atomic skill looks up the task by ID, reads its title and description, and uses them as the task definition for its dev loop.
