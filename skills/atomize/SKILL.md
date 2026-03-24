@@ -89,7 +89,7 @@ If decomposition yields more than 20 tasks, the original prompt is likely too br
 - `create display name input field` — this belongs inside a settings form component, not its own task
 - `write handleSubmit function` — internal implementation detail, not an atomic deliverable
 
-**Completeness check** — before saving, do two things: (1) verify every aspect of "done" from Step 2 maps to at least one task, adding any gaps; (2) scan the list and remove any test tasks. Show the final list to the user and get confirmation before proceeding.
+**Completeness check** — before saving, verify every aspect of "done" from Step 2 maps to at least one task, adding any gaps. Show the final list to the user and get confirmation before proceeding.
 
 ---
 
