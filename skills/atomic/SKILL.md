@@ -135,43 +135,53 @@ One logical unit per iteration, one commit per green test. The main agent orches
 
 ### The loop
 
-1. **Delegate** — trigger the agent pipeline that matches the task type (see Agent collaboration pipelines above). Agents collaborate directly — each agent's output feeds into the next. Pass the task context and any prior fix feedback to the first agent in the pipeline.
-2. **Verify** — main agent checks the agent's output against all [quality gates](#quality-gates).
-3. **If all gates pass** — commit with a focused message, then you MUST run the **simplify** skill on the changed code (do not skip this step). If simplify produces changes, commit them with message `refactor: simplify <what changed>`.
-4. **If any gate fails** — identify which gate(s) failed and send specific failure details back to the responsible subagent for fixes. Max **3 fix cycles** per iteration — if still failing after 3 attempts, stop and ask the user.
-5. **Repeat** until the task is complete.
-6. **Finalize** — once all iterations are done:
-   - If the task came from a numeric ID, mark it `done`:
-     ```
-     uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('done', <id>)); conn.commit(); conn.close()"
-     ```
-   - If `.devkit/tasks.md` exists, append a completion note. Use `git log origin/master..HEAD --stat` (substitute `master` with the actual trunk branch name if different) to scope the note to only commits in this task's branch — do not summarize the whole project. If the branch has never been pushed, use `git log HEAD --stat` scoped to commits since branching:
-     For numeric tasks use `## task-<id>: <title>`, for text tasks use `## task: <title>`:
-     ```markdown
-     ## task-<id>: <title>
-     - libraries: <packages added in this task, e.g. requests, pydantic — or "none">
-     - files: <files created or modified in this task, comma-separated>
-     - decisions: <key design choices made during this task>
-     - notes: <what a future session needs to know to continue or build on this specific task>
-     ```
-     Be specific and factual — write only what actually happened in this task's commits. Future sessions read this to understand what is already built without replaying git history.
-   - Run **pr-review-toolkit:review-pr** for a comprehensive review. If issues found, send back to agents for fixes.
-   - **Ask the user for confirmation** before pushing and opening a PR.
-   - If confirmed, push the feature branch: `git push -u origin <branch-name>`
-   - Open a pull request against the trunk branch and summarize what was implemented. If the task references an external issue (Jira, GitHub Issues, Linear), include the issue key in the PR title (e.g., `PL-2: add user login endpoint`).
-   - Print the completion checklist showing which steps were executed:
-     ```
-     Atomic workflow complete:
-     [x/skip] context7 docs fetched
-     [x/skip] feature-dev delegated
-     [x/skip] frontend-design delegated
-     [x/skip] code-review ran
-     [x/skip] simplify ran
-     [x/skip] pr-review-toolkit ran
-     [x/skip] tests passing
-     [x/skip] pushed + PR opened
-     ```
-     Mark each as `x` (done) or `skip` (with reason). This makes skipped steps visible to the user.
+Repeat these steps for each logical unit until the task is complete:
+
+1. **Delegate** — trigger the agent pipeline that matches the task type (see Agent collaboration pipelines above). Pass the task context and any prior fix feedback to the first agent.
+2. **Verify** — check the output against all [quality gates](#quality-gates).
+3. **Gates pass** — commit with a focused message, then run the **simplify** skill. If simplify produces changes, commit them: `refactor: simplify <what changed>`.
+4. **Gates fail** — send specific failure details back to the responsible agent for fixes. Max **3 fix cycles** — if still failing after 3 attempts, stop and ask the user.
+
+### Finalize
+
+Once all loop iterations are done, run these steps in order:
+
+1. **Mark done** — if the task came from a numeric ID:
+   ```
+   uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('done', <id>)); conn.commit(); conn.close()"
+   ```
+
+2. **Append to `.devkit/tasks.md`** — permanent history log. Use `git log origin/<trunk>..HEAD --stat` to scope to this branch only (if never pushed, use `git log HEAD --stat` scoped to commits since branching). For numeric tasks: `## task-<id>: <title>`, for text tasks: `## task: <title>`. Create the file if it doesn't exist; always append, never overwrite.
+   ```markdown
+   ## task-<id>: <title>
+   - libraries: <packages added — or "none">
+   - files: <files created or modified, comma-separated>
+   - decisions: <key design choices made>
+   - notes: <what a future session needs to know to continue this task>
+   ```
+
+3. **PR review** — run **pr-review-toolkit:review-pr**. If issues found, send back to agents for fixes.
+
+4. **Confirm with user** — ask before pushing. If confirmed:
+   - Push: `git push -u origin <branch-name>`
+   - Open a PR against trunk summarizing what was implemented. Include the issue key in the title if the task references an external issue (e.g., `PL-2: add user login endpoint`).
+
+5. **Update `## Scope` in CLAUDE.md** — if `CLAUDE.md` exists in the project root, rewrite its `## Scope` section as a single, always-current description of what the entire project is and does after this PR. Read the existing section first, incorporate what this PR added, and simplify — remove superseded detail. Create `## Scope` at the top of the file if it doesn't exist. Base the rewrite on `git log origin/<trunk>..HEAD --oneline`. Skip if CLAUDE.md does not exist.
+
+6. **Print completion checklist**:
+   ```
+   Atomic workflow complete:
+   [x/skip] context7 docs fetched
+   [x/skip] feature-dev delegated
+   [x/skip] frontend-design delegated
+   [x/skip] code-review ran
+   [x/skip] simplify ran
+   [x/skip] pr-review-toolkit ran
+   [x/skip] tests passing
+   [x/skip] pushed + PR opened
+   [x/skip] CLAUDE.md updated
+   ```
+   Mark each as `x` (done) or `skip` (with reason).
 
 ### Quality gates
 
