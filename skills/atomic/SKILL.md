@@ -26,7 +26,7 @@ print(f'description: {row[2]}')
 - If the task status is `done`, stop and tell the user it's already completed.
 - If the task status is `in_progress`, warn the user it was previously started and ask whether to resume or restart.
   - **Resume** — switch to the existing branch and continue from the last completed iteration in the dev loop.
-  - **Restart** — ask the user for confirmation, then delete the old feature branch, reset the task status to `pending`, and continue from Step 2 as if starting fresh.
+  - **Restart** — ask the user for confirmation, then delete the old feature branch, reset the task status to `pending`, and continue from Step 1 as if starting fresh.
 - If found, use `title` + `description` as the resolved task definition for all steps below.
 
 **If text** — use `$ARGUMENTS` directly as the task definition.
@@ -40,24 +40,9 @@ print(f'description: {row[2]}')
 
 ---
 
-## Step 1 — Route by task type
+## Step 1 — Create a feature branch
 
-Before writing any code, classify the task and check these routing rules. Apply all that match:
-
-- **If the working directory has no source code** — ask the user about project setup (language, framework, structure) before proceeding.
-- **If the task involves frontend UI/UX design** — invoke the **frontend-design:frontend-design** skill for design decisions (layout, styling, visuals), then **feature-dev:feature-dev** for implementation.
-- **If the task modifies existing application code** — invoke the **feature-dev:feature-dev** skill to understand the codebase and architecture before implementing.
-- **If the task is backend-only** (e.g., REST endpoint, service logic, data layer) — invoke **feature-dev:feature-dev** for implementation.
-- **If the task is a worker/job** (e.g., background processor, cron job, queue consumer) — invoke **feature-dev:feature-dev** for implementation.
-- **If the task is infrastructure** (e.g., Dockerfiles, CI/CD, deploy config) — invoke **feature-dev:feature-dev** for implementation.
-- **If the task is full-stack** (frontend + backend) — invoke **feature-dev:feature-dev** for backend first, then **frontend-design:frontend-design** for UI design, then **feature-dev:feature-dev** for frontend implementation.
-- **If the task involves a library or third-party package** — use the **context7** MCP tools (`resolve-library-id` then `query-docs`) to fetch up-to-date documentation before writing any code.
-
-These are mandatory checks, not optional.
-
----
-
-## Step 2 — Create a feature branch
+If the working directory has no source code, ask the user about project setup (language, framework, structure) before proceeding.
 
 Check for uncommitted changes first:
 ```
@@ -150,7 +135,7 @@ One logical unit per iteration, one commit per green test. The main agent orches
 
 ### The loop
 
-1. **Delegate** — trigger the agent pipeline based on Step 1 routing. Agents collaborate directly — each agent's output feeds into the next. Pass the task context and any prior fix feedback to the first agent in the pipeline.
+1. **Delegate** — trigger the agent pipeline that matches the task type (see Agent collaboration pipelines above). Agents collaborate directly — each agent's output feeds into the next. Pass the task context and any prior fix feedback to the first agent in the pipeline.
 2. **Verify** — main agent checks the agent's output against all [quality gates](#quality-gates).
 3. **If all gates pass** — commit with a focused message, then you MUST run the **simplify** skill on the changed code (do not skip this step). If simplify produces changes, commit them with message `refactor: simplify <what changed>`.
 4. **If any gate fails** — identify which gate(s) failed and send specific failure details back to the responsible subagent for fixes. Max **3 fix cycles** per iteration — if still failing after 3 attempts, stop and ask the user.
