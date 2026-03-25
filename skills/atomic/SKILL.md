@@ -42,6 +42,12 @@ print(f'description: {row[2]}')
 
 ## Step 1 — Create a feature branch
 
+Check for `.devkit/batch.json` first:
+```bash
+cat .devkit/batch.json 2>/dev/null
+```
+If it exists, read `branch` and `trunk` from it. This means `build` is orchestrating a batch run — the branch is already created and managed by build. Skip all branch creation logic and the PR status check below. Proceed directly to the Implementation section. (You'll also skip the push and PR steps in Finalize — build handles those.)
+
 If the working directory has no source code, ask the user about project setup (language, framework, structure) before proceeding.
 
 Check for uncommitted changes first:
@@ -55,7 +61,13 @@ Check the current branch:
 git branch --show-current
 ```
 
-If already on a feature branch (not `main`, `master`, `develop`, or `trunk`), ask the user whether to continue on it or create a new branch. Do not silently continue on a potentially unrelated branch.
+If already on a feature branch (not `main`, `master`, `develop`, or `trunk`), check whether a PR exists for it:
+```
+gh pr view --json state,title,url 2>/dev/null
+```
+- **PR is open (not merged)** — tell the user the branch has an open PR, show the title and URL, then ask: "Do you want to add commits to this branch (continuing the open PR), or start a new branch for this task?" Do not assume — they may want to keep the PR focused.
+- **PR is merged** — tell the user this branch's PR was already merged. Suggest switching back to trunk and creating a new branch for the current task. Do not continue on a merged branch.
+- **No PR / gh not available** — ask the user whether to continue on the existing branch or create a new one. Do not silently continue on a potentially unrelated branch.
 
 If on a trunk branch (`main`, `master`, `develop`, or `trunk`), derive a branch name from the task title — prefix with `feat/`, lowercase, hyphenated, no special chars — and create it:
 ```
@@ -160,10 +172,9 @@ Once all loop iterations are done, run these steps in order:
    - notes: <what a future session needs to know to continue this task>
    ```
 
-3. **PR review** — run **pr-review-toolkit:review-pr**. If issues found, send back to agents for fixes.
-
-4. **Confirm with user** — ask before pushing. If confirmed:
-   - Push: `git push -u origin <branch-name>`
+3. **PR review and push** — if `.devkit/batch.json` exists, skip this step entirely (build handles the final PR review and push for the whole batch). Otherwise:
+   - Run **pr-review-toolkit:review-pr**. If issues found, send back to agents for fixes.
+   - Ask user for confirmation, then push: `git push -u origin <branch-name>`
    - Open a PR against trunk summarizing what was implemented. Include the issue key in the title if the task references an external issue (e.g., `PL-2: add user login endpoint`).
 
 5. **Update `## Scope` in CLAUDE.md** — if `CLAUDE.md` exists in the project root, rewrite its `## Scope` section as a single, always-current description of what the entire project is and does after this PR. Read the existing section first, incorporate what this PR added, and simplify — remove superseded detail. Create `## Scope` at the top of the file if it doesn't exist. Base the rewrite on `git log origin/<trunk>..HEAD --oneline`. Skip if CLAUDE.md does not exist.

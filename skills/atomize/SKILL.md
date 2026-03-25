@@ -8,13 +8,17 @@ argument-hint: "[task description]"
 
 If `$ARGUMENTS` is empty, stop and ask the user to provide a task description. Do not proceed without a task.
 
-If `$ARGUMENTS` references an external issue tracker (Jira key like `PL-2`, GitHub issue `#123`, Linear issue), fetch the issue details first and use the issue title + description as the task definition for all steps below.
+If `$ARGUMENTS` references an external issue tracker (Jira key like `PL-2`, GitHub issue `#123`, Linear issue), fetch the full issue details — title, description, and any acceptance criteria. Use this fetched text as the task definition for all steps below. The full text (not the issue key) becomes `parent_prompt` in Step 4, so every downstream agent has the complete requirement rather than just a lookup reference. Verify the fetched text is complete before proceeding.
 
 ---
 
 ## Step 1 — Clarify unknowns
 
-Before elaborating, scan the working directory for project files (`pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`, existing source code) to infer technical decisions already made. Only ask the user about what cannot be inferred from the codebase.
+Before elaborating, do two things:
+
+**Read project context** — check for `CLAUDE.md` in the project root. Note any resources it documents: template directories, catalogs, schemas, APIs, or conventions. Also scan for files directly relevant to the task — if the task involves documents, look for `templates/`; if it involves data, look for schema files or seed data. Record what you find; these discovered resources become constraints you weave into task descriptions in Step 3.
+
+**Infer technical decisions** — scan for project files (`pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`, existing source code) to understand the stack already in use. Only ask the user about what cannot be inferred.
 
 For any remaining unspecified decisions that affect how the task breaks down, ask about **all** that are relevant in a single grouped question — do not assume any of them:
 
@@ -54,7 +58,7 @@ Exception: if the user's prompt is explicitly about testing (e.g., "write tests 
 Each implementation task must:
 - Start with a single action verb (add, create, write, configure, update, delete)
 - Do exactly one thing — touches one file or one concern
-- Have a short `title` (3-8 words) and a one-sentence `description` that says **what gets created and where** (target file, function name, or endpoint — enough for someone to implement it without re-reading the original prompt)
+- Have a short `title` (3-8 words) and a one-sentence `description` that says **what gets created and where**, naming any existing files, templates, schemas, or APIs from Step 1 that the implementation should build on — enough for an agent to start without re-reading the original prompt or guessing project conventions
 - Be assigned an `exec_order` (1, 2, 3...) reflecting dependency order
 
 **Split any task that:**
@@ -89,7 +93,14 @@ If decomposition yields more than 20 tasks, the original prompt is likely too br
 - `create display name input field` — this belongs inside a settings form component, not its own task
 - `write handleSubmit function` — internal implementation detail, not an atomic deliverable
 
-**Completeness check** — before saving, verify every aspect of "done" from Step 2 maps to at least one task, adding any gaps. Show the final list to the user and get confirmation before proceeding.
+**Completeness check** — before saving, list each requirement from the Step 2 elaboration and show which task covers it. A requirement with no covering task is a gap; add a task for it before saving. Present this as a coverage table alongside the task list so gaps are obvious:
+
+| Requirement | Covered by |
+|---|---|
+| user can download completed document | #4 add PDF download button |
+| form values substitute into template | #2 create NDA document component |
+
+Get the user's confirmation before saving.
 
 ---
 

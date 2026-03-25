@@ -22,7 +22,21 @@ Run `atomize` first if tasks haven't been decomposed yet. This skill only execut
 
 Ask the user once: "What is your trunk branch — `main` or `master`?" Remember the answer and use it for all git syncs in this session.
 
-### 1b. Load the pending task list
+### 1b. Choose delivery mode
+
+Ask the user: "How should tasks be delivered?"
+- **Sequential** (default): one PR per task — each atomic task gets its own branch and PR; you merge each before the next task starts
+- **Batch**: all tasks on one shared branch — each task commits to the same branch; one PR is opened at the end
+
+If **Batch** is chosen:
+1. Derive a branch name from the first task's title or the parent_prompt (lowercase, hyphenated, `feat/` prefix, max 40 chars). Show it to the user and allow them to rename it.
+2. Create the branch: `git checkout -b feat/<name>`
+3. Write `.devkit/batch.json`:
+   ```json
+   {"branch": "feat/<name>", "trunk": "<trunk-branch>"}
+   ```
+
+### 1c. Load the pending task list
 
 Query `.devkit/tasks.db`. If `$ARGUMENTS` is provided and looks like a task description (not a number), filter by `parent_prompt`:
 
@@ -87,30 +101,33 @@ The atomic skill handles everything: feature branch, agent pipeline, quality gat
 
 **If atomic stops due to a failure** (e.g., quality gates still failing after 3 fix cycles, or a blocker the user needs to resolve): pause the build loop and ask the user whether to skip this task and continue to the next, retry the same task, or abort the run entirely. Do not proceed automatically.
 
-### 2c. Wait for merge
+### 2c. After atomic completes
 
-After atomic reports the PR is open, pause:
-
+**Sequential mode**: After atomic reports the PR is open, pause:
 ```
 Task <id> PR is open. Merge it on GitHub, then say "continue" or "next" to proceed.
 Next up: <next-id>: <next-title>
 ```
-
-(Omit the "Next up" line if this is the last task.)
-
-Do not proceed until the user explicitly confirms the PR is merged.
-
-### 2d. Sync trunk
-
-Once the user confirms:
-
+(Omit the "Next up" line if this is the last task.) Do not proceed until the user explicitly confirms the PR is merged. Then sync trunk:
 ```bash
 git fetch origin
 git checkout <trunk-branch>
 git pull
 ```
 
-Then move to the next task.
+**Batch mode**: No wait, no sync. Move directly to the next task.
+
+---
+
+## Step 2b — Batch finalize (batch mode only)
+
+After all tasks complete, run these in order:
+
+1. **PR review** — run **pr-review-toolkit:review-pr** across all changes on the branch. If issues are found, send back to the responsible agent for fixes.
+2. **Confirm with user** — ask before pushing.
+3. **Push**: `git push -u origin <branch-name>`
+4. **Open one PR** against trunk summarizing all tasks implemented. List each task title as a bullet. Include any external issue keys referenced.
+5. **Delete batch state**: `rm .devkit/batch.json`
 
 ---
 
