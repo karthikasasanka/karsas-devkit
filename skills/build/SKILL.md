@@ -78,11 +78,27 @@ If `--retry <id>` is set:
 
 ## Step 1 — Setup
 
-### 1a. Ask about trunk branch
+### 1a. Detect continue mode
+
+Before asking anything, check whether this is a continuation of an in-progress build:
+
+```bash
+git branch --show-current
+git rev-parse --abbrev-ref origin/HEAD 2>/dev/null || echo "unknown"
+```
+
+If the current branch is already a `feat/*` branch **and** there are `done` tasks in the DB, this is a continue session. In that case:
+- Infer trunk from `git rev-parse --abbrev-ref origin/HEAD` (strip the `origin/` prefix). If ambiguous, default to `main`.
+- If `.devkit/batch.json` exists, read trunk and branch from it — skip steps 1b and 1c entirely.
+- If no `batch.json` but already on a `feat/*` branch with prior commits ahead of trunk, assume batch mode on the current branch. Tell the user: "Continuing in batch mode on `<branch>` (trunk: `<trunk>`). Say 'switch to sequential' to change." Then proceed without asking.
+
+Only ask the questions in 1b/1c when starting fresh (no done tasks and not on a feature branch).
+
+### 1b. Ask about trunk branch (fresh start only)
 
 Ask the user once: "What is your trunk branch — `main` or `master`?" Remember the answer for all git syncs in this session.
 
-### 1b. Choose delivery mode
+### 1c. Choose delivery mode (fresh start only)
 
 Ask the user: "How should tasks be delivered?"
 - **Sequential** (default): one PR per task — each atomic task gets its own branch and PR; you merge each before the next task starts
@@ -96,7 +112,7 @@ If **Batch** is chosen:
    {"branch": "feat/<name>", "trunk": "<trunk-branch>"}
    ```
 
-### 1c. Load and validate the pending task list
+### 1d. Load and validate the pending task list
 
 Query `.devkit/tasks.db`. Apply any `--from` or `--only` filters after loading:
 
@@ -137,9 +153,24 @@ From the results:
 - **Treat `in_progress` as pending** — the atomic skill will handle the resume/restart dialogue.
 - **Stop** if there are no pending tasks — tell the user everything is already done.
 
-### 1d. Validate dependency graph
+### 1e. Validate dependency graph
 
-Before confirming, validate that `depends_on` references form a DAG (no cycles) for the tasks about to run. Run this check:
+Before confirming, check whether any pending task has a `depends_on` value:
+
+```python
+uv run python -c "
+import sqlite3, os
+db = '.devkit/tasks.db'
+conn = sqlite3.connect(db)
+count = conn.execute('SELECT COUNT(*) FROM tasks WHERE depends_on IS NOT NULL AND status != \"done\"').fetchone()[0]
+conn.close()
+print(count)
+"
+```
+
+If the result is `0`, skip the cycle check entirely — there are no dependencies to validate.
+
+Otherwise, validate that `depends_on` references form a DAG (no cycles) for the tasks about to run. Run this check:
 
 ```python
 uv run python -c "

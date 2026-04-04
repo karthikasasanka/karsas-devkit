@@ -101,7 +101,18 @@ uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); co
 
 ## Implementation — Agent Delegation
 
-The main agent orchestrates, verifies, and enforces quality. Prefer delegating implementation to specialized agents rather than writing code directly.
+The main agent orchestrates, verifies, and enforces quality. Delegate to specialized agents for non-trivial tasks. For simple tasks, implement inline — agents add latency and token cost that aren't justified when the change is small.
+
+### When to implement inline vs. delegate
+
+**Implement inline** (no feature-dev, no code-review) when the task:
+- Is a refactor, rename, swap, or removal (e.g., "replace ORM X with Y", "remove deprecated import")
+- Will change ≤ 3 files and ≤ 50 lines of implementation code
+- Has existing tests that verify the behavior
+
+In these cases: read the relevant files, apply the change directly, run tests. Skip feature-dev. The loop's pre-commit inline review still applies.
+
+**Delegate to agents** when the task involves new functionality, business logic, or multiple interacting components — anything where understanding the broader codebase is load-bearing for correctness.
 
 ### Agent roster
 
@@ -112,9 +123,12 @@ The main agent orchestrates, verifies, and enforces quality. Prefer delegating i
 | Frontend UI/UX design | **frontend-design:frontend-design** | UI design, layout, styling, visual decisions |
 | Library/package usage | **context7** MCP tools | Fetch up-to-date docs before any agent writes code |
 | Infrastructure/deploy | **feature-dev:feature-dev** | Dockerfiles, CI/CD, infrastructure config |
-| Code quality | **code-review:code-review** | Review each iteration's output |
-| Post-commit cleanup | **simplify** | Review changed code for reuse, quality, efficiency |
-| Pre-push review | **pr-review-toolkit:review-pr** | Comprehensive PR review before pushing |
+| Pre-commit cleanup | **simplify** | Reduce redundancy, remove dead code, tighten style |
+| Pre-commit review | **code-review:code-review** | Review after simplify, before committing |
+
+### context7 — avoid redundant resolves
+
+If you already resolved a library ID earlier in this build session (e.g., the previous task queried the same library), reuse the library ID — skip the resolve call and go straight to query-docs. The library ID doesn't change between tasks.
 
 ### Agent collaboration
 
@@ -124,30 +138,25 @@ Agents collaborate directly in a pipeline — each agent's output feeds into the
 1. **context7** → fetch framework/library docs
 2. **frontend-design:frontend-design** → produce UI/UX design
 3. **feature-dev:feature-dev** → implement components, hooks, pages based on the design
-4. **code-review:code-review** → review the implementation
 
 **Backend task** (e.g., add a REST endpoint):
 1. **context7** → fetch library/framework docs
 2. **feature-dev:feature-dev** → implement route, service logic, data layer
-3. **code-review:code-review** → review the implementation
 
 **Worker/job task** (e.g., background email sender, cron job):
 1. **context7** → fetch docs for queue/scheduler libraries
 2. **feature-dev:feature-dev** → implement the worker logic
-3. **code-review:code-review** → review the implementation
 
 **Infrastructure task** (e.g., add Docker setup, CI/CD pipeline):
 1. **feature-dev:feature-dev** → create Dockerfiles, compose files, CI config
-2. **code-review:code-review** → review the configuration
 
 **Full-stack task** (e.g., user profile page with API):
 1. **context7** → fetch docs for both frontend and backend libraries
 2. **feature-dev:feature-dev** → implement backend API first
 3. **frontend-design:frontend-design** → produce UI/UX design for the frontend
 4. **feature-dev:feature-dev** → implement frontend based on the design, wired to the API
-5. **code-review:code-review** → review the full stack
 
-**code-review:code-review** is mandatory at the end of every pipeline — do not skip it.
+Review happens after simplify in the dev loop (see below), not inside the pipeline.
 
 ---
 
@@ -186,7 +195,12 @@ Repeat these steps for each logical unit until the task is complete:
 
 1. **Delegate** — trigger the agent pipeline that matches the task type. Pass the task context and any prior fix feedback to the first agent.
 2. **Verify** — check the output against all [quality gates](#quality-gates).
-3. **Gates pass** — reset consecutive failure count to 0. Commit with a focused message. Then, unless `--skip-simplify` was set, run the **simplify** skill. If simplify produces changes, commit them: `refactor: simplify <what changed>`.
+3. **Gates pass** — reset consecutive failure count to 0. Before committing, clean up and review the staged changes:
+   - Count the lines changed: `git diff --stat | tail -1`
+   - **≤ 50 lines**: review inline — scan the diff yourself for redundant code, unused imports, naming issues. Apply fixes directly. No agents needed.
+   - **51–200 lines**: run the **simplify** skill, then **code-review:code-review** on the result.
+   - **> 200 lines**: run the **simplify** skill (full pass), then **code-review:code-review**.
+   After any fixes, re-run tests to confirm they still pass. Then commit everything in one clean commit with a focused message.
 4. **Gates fail** — increment consecutive failure count. Send specific failure details back to the responsible agent for fixes.
    - If consecutive failure count reaches **3**, stop delegating and present this menu to the user:
      ```
@@ -218,8 +232,7 @@ Once all loop iterations are done, run these steps in order:
    - notes: <what a future session needs to know to continue this task>
    ```
 
-3. **PR review and push** — if `.devkit/batch.json` exists or `--no-pr` was set, skip this step entirely. Otherwise:
-   - Run **pr-review-toolkit:review-pr**. If issues found, send back to agents for fixes.
+3. **Push** — if `.devkit/batch.json` exists or `--no-pr` was set, skip this step entirely. Otherwise:
    - Ask user for confirmation, then push: `git push -u origin <branch-name>`
    - Open a PR against trunk summarizing what was implemented.
 
