@@ -4,32 +4,22 @@ description: Orchestrate sequential execution of all pending atomic tasks from .
 argument-hint: "[--from <id>] [--only <ids>] [--status] [--retry <id>] [optional: parent_prompt filter]"
 ---
 
-## Overview
-
-This skill drives sequential execution of atomic tasks already saved in `.devkit/tasks.db`:
-
-1. **Load** — query pending tasks in exec_order, validate the dependency graph, confirm with user
-2. **Execute** — run the `atomic` skill on each task
-3. **Gate** — after each PR is pushed, pause for the user to merge before continuing
-
-Run `atomize` first if tasks haven't been decomposed yet. This skill only executes — it does not decompose.
+This skill drives sequential execution of atomic tasks from `.devkit/tasks.db`. It does not decompose tasks — run `atomize` first if needed.
 
 ---
 
 ## Step 0 — Parse flags
 
-Parse flags from `$ARGUMENTS` before treating the rest as an optional parent_prompt filter:
+Parse from `$ARGUMENTS` (remainder is optional parent_prompt filter):
 
-- `--status` — print the current task status table and exit immediately (no execution)
-- `--from <id>` — skip all tasks with `exec_order` less than the exec_order of the given task ID; start from that task
-- `--only <ids>` — run only the specified task IDs (comma-separated, e.g. `--only 3,5,7`); ignore all others
-- `--retry <id>` — reset the specified task to `pending` and run only that task
+- `--status` — print status table and exit
+- `--from <id>` — skip tasks with exec_order below the given task's exec_order
+- `--only <ids>` — run only these task IDs (comma-separated)
+- `--retry <id>` — reset task to `pending` and run only it
 
-These flags are mutually exclusive: if `--status` is present, just show status and exit. If `--retry` is present, handle the retry and exit. Otherwise, `--from` and `--only` can be combined with a parent_prompt filter.
+`--status` and `--retry` exit immediately after handling. `--from` and `--only` can combine with a parent_prompt filter.
 
-### --status handling
-
-If `--status` is set, query the DB and print a grouped status table, then exit:
+### --status
 
 ```python
 uv run python -c "
@@ -64,15 +54,11 @@ for status in ['in_progress', 'pending', 'done']:
 " "$ARGUMENTS"
 ```
 
-### --retry handling
+### --retry
 
-If `--retry <id>` is set:
-1. Reset the task to `pending`:
-   ```
-   uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('pending', <id>)); conn.commit(); conn.close(); print('Task <id> reset to pending.')"
-   ```
-2. Run the atomic skill on that task: `/devkit:atomic <id>`
-3. Exit after atomic completes.
+1. Reset: `uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('pending', <id>)); conn.commit(); conn.close()"`
+2. Run: `/devkit:atomic <id>`
+3. Exit.
 
 ---
 
@@ -80,41 +66,39 @@ If `--retry <id>` is set:
 
 ### 1a. Detect continue mode
 
-Before asking anything, check whether this is a continuation of an in-progress build:
-
 ```bash
 git branch --show-current
 git rev-parse --abbrev-ref origin/HEAD 2>/dev/null || echo "unknown"
 ```
 
-If the current branch is already a `feat/*` branch **and** there are `done` tasks in the DB, this is a continue session. In that case:
-- Infer trunk from `git rev-parse --abbrev-ref origin/HEAD` (strip the `origin/` prefix). If ambiguous, default to `main`.
-- If `.devkit/batch.json` exists, read trunk and branch from it — skip steps 1b and 1c entirely.
-- If no `batch.json` but already on a `feat/*` branch with prior commits ahead of trunk, assume batch mode on the current branch. Tell the user: "Continuing in batch mode on `<branch>` (trunk: `<trunk>`). Say 'switch to sequential' to change." Then proceed without asking.
+- If `.devkit/batch.json` exists → read trunk and branch from it; skip 1b and 1c.
+- If on a `feat/*` branch with `done` tasks → continuing. Infer trunk from `origin/HEAD` (strip `origin/`), default `main`. Tell user: "Continuing in batch mode on `<branch>` (trunk: `<trunk>`). Say 'switch to sequential' to change." Skip 1b and 1c.
+- Otherwise → fresh start, ask 1b and 1c.
 
-Only ask the questions in 1b/1c when starting fresh (no done tasks and not on a feature branch).
+### 1b. Trunk branch (fresh start only)
 
-### 1b. Ask about trunk branch (fresh start only)
+Ask: "What is your trunk branch — `main` or `master`?"
 
-Ask the user once: "What is your trunk branch — `main` or `master`?" Remember the answer for all git syncs in this session.
+### 1c. Delivery mode (fresh start only)
 
-### 1c. Choose delivery mode (fresh start only)
+Ask: "How should tasks be delivered?"
+- **Sequential** (default): one PR per task; wait for merge before next
+- **Batch**: all tasks on one branch; one PR at the end
 
-Ask the user: "How should tasks be delivered?"
-- **Sequential** (default): one PR per task — each atomic task gets its own branch and PR; you merge each before the next task starts
-- **Batch**: all tasks on one shared branch — each task commits to the same branch; one PR is opened at the end
-
-If **Batch** is chosen:
-1. Derive a branch name from the first task's title or the parent_prompt (lowercase, hyphenated, `feat/` prefix, max 40 chars). Show it to the user and allow them to rename it.
-2. Create the branch: `git checkout -b feat/<name>`
-3. Write `.devkit/batch.json`:
-   ```json
-   {"branch": "feat/<name>", "trunk": "<trunk-branch>"}
-   ```
+If **Batch**:
+1. Derive branch name from first task title or parent_prompt (`feat/<name>`, max 40 chars). Confirm with user.
+2. `git checkout -b feat/<name>`
+3. Write `.devkit/batch.json`: `{"branch": "feat/<name>", "trunk": "<trunk>"}`
 
 ### 1d. Load and validate the pending task list
 
-Query `.devkit/tasks.db`. Apply any `--from` or `--only` filters after loading:
+**HARD GATE — check before running anything else:**
+
+```bash
+test -f .devkit/tasks.db && echo "EXISTS" || echo "MISSING"
+```
+
+If `MISSING`: do NOT implement any tasks. Invoke `/devkit:atomize` with the full content of `$ARGUMENTS`, then re-run build from Step 1d.
 
 ```python
 uv run python -c "
@@ -144,61 +128,44 @@ print(f'Pending: {len(pending)} of {len(rows)} tasks')
 " "$ARGUMENTS"
 ```
 
-Apply `--from <id>` filter: find the `exec_order` of that task ID and exclude tasks with lower exec_order.
+Apply filters: `--from <id>` excludes tasks with lower exec_order; `--only <ids>` excludes unlisted IDs.
 
-Apply `--only <ids>` filter: exclude all tasks whose IDs are not in the provided list.
-
-From the results:
-- **Skip** tasks with status `done` — already finished.
-- **Treat `in_progress` as pending** — the atomic skill will handle the resume/restart dialogue.
-- **Stop** if there are no pending tasks — tell the user everything is already done.
+- Skip `done` tasks.
+- Treat `in_progress` as pending (atomic handles resume).
+- Stop if no pending tasks.
 
 ### 1e. Validate dependency graph
 
-Before confirming, check whether any pending task has a `depends_on` value:
-
 ```python
 uv run python -c "
-import sqlite3, os
-db = '.devkit/tasks.db'
-conn = sqlite3.connect(db)
+import sqlite3
+conn = sqlite3.connect('.devkit/tasks.db')
 count = conn.execute('SELECT COUNT(*) FROM tasks WHERE depends_on IS NOT NULL AND status != \"done\"').fetchone()[0]
 conn.close()
 print(count)
 "
 ```
 
-If the result is `0`, skip the cycle check entirely — there are no dependencies to validate.
-
-Otherwise, validate that `depends_on` references form a DAG (no cycles) for the tasks about to run. Run this check:
+If `0`, skip cycle check. Otherwise:
 
 ```python
 uv run python -c "
-import sqlite3, os, sys
+import sqlite3
 from collections import defaultdict, deque
-
-db = '.devkit/tasks.db'
-conn = sqlite3.connect(db)
+conn = sqlite3.connect('.devkit/tasks.db')
 rows = conn.execute('SELECT id, title, depends_on FROM tasks WHERE status != \"done\"').fetchall()
 conn.close()
-
-# Build graph
 graph = defaultdict(list)
 in_degree = {r[0]: 0 for r in rows}
 id_to_title = {r[0]: r[1] for r in rows}
 task_ids = set(r[0] for r in rows)
-
 for task_id, title, depends_on in rows:
     if depends_on:
         for dep in depends_on.split(','):
-            dep = dep.strip()
-            if dep:
-                dep_id = int(dep)
-                if dep_id in task_ids:
-                    graph[dep_id].append(task_id)
-                    in_degree[task_id] = in_degree.get(task_id, 0) + 1
-
-# Kahn's algorithm
+            dep_id = int(dep.strip())
+            if dep_id in task_ids:
+                graph[dep_id].append(task_id)
+                in_degree[task_id] = in_degree.get(task_id, 0) + 1
 queue = deque(tid for tid in in_degree if in_degree[tid] == 0)
 visited = 0
 while queue:
@@ -208,29 +175,24 @@ while queue:
         in_degree[neighbor] -= 1
         if in_degree[neighbor] == 0:
             queue.append(neighbor)
-
 if visited != len(rows):
     cycle_tasks = [f'{tid}: {id_to_title[tid]}' for tid in in_degree if in_degree[tid] > 0]
-    print('ERROR: Dependency cycle detected in the following tasks:')
+    print('ERROR: Dependency cycle detected:')
     for t in cycle_tasks:
         print(f'  {t}')
     raise SystemExit(1)
 else:
-    print('Dependency graph OK — no cycles detected.')
+    print('Dependency graph OK.')
 "
 ```
 
-If a cycle is detected, abort immediately. Do not proceed until the user fixes the dependencies (either by re-running atomize or manually editing the DB).
+Abort if a cycle is detected. Do not proceed until the user fixes it.
 
-### 1e. Show size summary and confirm
+### 1f. Confirm
 
-If any tasks have a `size` value, print a one-line summary before asking for confirmation:
+If any tasks have `size`, print: `Tasks: 2S 3M 1L`
 
-```
-Tasks: 2S 3M 1L  (or however many of each)
-```
-
-Show the user the task list and confirm before proceeding.
+Show task list and confirm before proceeding.
 
 ---
 
@@ -246,60 +208,47 @@ Starting task <id> of <total pending>: <title>
 
 ### 2b. Run atomic
 
-Invoke the **atomic** skill with the task's numeric ID:
-
 ```
 /devkit:atomic <task-id>
 ```
 
-The atomic skill handles everything: feature branch, agent pipeline, quality gates, commits, simplify, pr-review, and pushing the PR.
-
-**If atomic stops due to a failure**: pause the build loop and ask the user whether to skip this task and continue, retry the same task, or abort the run entirely.
-
-**Track failures**: keep a list of tasks that failed or were skipped (with reason) for the final summary.
+If atomic fails: ask to skip, retry, or abort. Track failures for final summary.
 
 ### 2c. After atomic completes
 
-**Sequential mode**: After atomic reports the PR is open, pause:
+**Sequential**: pause after PR is open:
 ```
-Task <id> PR is open. Merge it on GitHub, then say "continue" or "next" to proceed.
+Task <id> PR is open. Merge it on GitHub, then say "continue" or "next".
 Next up: <next-id>: <next-title>
 ```
-(Omit "Next up" if this is the last task.) Do not proceed until the user explicitly confirms the PR is merged. Then sync trunk:
+Wait for user confirmation, then sync:
 ```bash
-git fetch origin
-git checkout <trunk-branch>
-git pull
+git fetch origin && git checkout <trunk> && git pull
 ```
 
-**Batch mode**: No wait, no sync. Move directly to the next task.
+**Batch**: no wait. Move to next task immediately.
 
 ---
 
 ## Step 2b — Batch finalize (batch mode only)
 
-After all tasks complete, run these in order:
-
-1. **PR review** — run **pr-review-toolkit:review-pr** across all changes on the branch.
-2. **Confirm with user** — ask before pushing.
-3. **Push**: `git push -u origin <branch-name>`
-4. **Open one PR** against trunk summarizing all tasks implemented. List each task title as a bullet.
-5. **Delete batch state**: `rm .devkit/batch.json`
+1. Run **pr-review-toolkit:review-pr** across all branch changes.
+2. Confirm with user before pushing.
+3. `git push -u origin <branch-name>`
+4. Open one PR against trunk listing each task title as a bullet.
+5. `rm .devkit/batch.json`
 
 ---
 
 ## Step 3 — Final summary
 
-After all tasks are done, re-query the DB to get current statuses and print the table.
+Re-query DB and print the status table.
 
-If any tasks were skipped or failed during this run, print a failure summary:
-
+If any tasks failed or were skipped this session:
 ```
 Failed / skipped tasks:
-  Task 4: create payment handler — gate failed after 3 fix cycles. Use: /devkit:build --retry 4
+  Task 4: create payment handler — gate failed. Use: /devkit:build --retry 4
   Task 6: add email notification — skipped by user. Use: /devkit:build --retry 6
 ```
 
-Print only tasks that failed or were skipped in this session (not previously failed ones). If all tasks completed successfully, omit this section.
-
-If `.devkit/tasks.md` exists, remind the user it contains per-task completion notes written during each atomic run.
+If `.devkit/tasks.md` exists, remind the user it has per-task completion notes.

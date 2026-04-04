@@ -6,16 +6,14 @@ argument-hint: "[--no-pr] [--skip-simplify] [task description] or [task id]"
 
 ## Step 0 — Resolve the task
 
-Parse flags from `$ARGUMENTS` before treating the rest as the task or ID:
+Parse flags from `$ARGUMENTS` first:
 
-- `--no-pr` — skip the PR push step entirely; commit to the current branch only
+- `--no-pr` — skip the PR push step; commit to current branch only
 - `--skip-simplify` — bypass the simplify pass after each commit
 
-Strip parsed flags so the remainder is the task description or numeric ID.
+Strip parsed flags; the remainder is the task description or numeric ID.
 
-Check if the remainder is a numeric ID or a text prompt:
-
-**If numeric** — look up the task from `.devkit/tasks.db`:
+**If numeric** — look up from `.devkit/tasks.db`:
 ```
 uv run python -c "
 import sqlite3, os
@@ -30,20 +28,15 @@ print(f'title: {row[1]}')
 print(f'description: {row[2]}')
 "
 ```
-- If the task status is `done`, stop and tell the user it's already completed.
-- If the task status is `in_progress`, warn the user it was previously started and ask whether to resume or restart.
-  - **Resume** — switch to the existing branch and continue from the last completed iteration in the dev loop.
-  - **Restart** — ask the user for confirmation, then delete the old feature branch, reset the task status to `pending`, and continue from Step 1 as if starting fresh.
-- If found, use `title` + `description` as the resolved task definition for all steps below.
+- `done` → stop, tell user it's already completed.
+- `in_progress` → warn, ask to resume (switch to existing branch, continue from last iteration) or restart (confirm, delete branch, reset to `pending`, start fresh from Step 1).
+- Found → use `title` + `description` as the task definition.
 
-**If text** — use the remainder directly as the task definition.
+**If text** — use the remainder directly. If it references an external issue tracker (Jira, GitHub Issues, Linear), fetch the issue details first.
 
-- If the text references an external issue tracker (Jira, GitHub Issues, Linear), fetch the issue details first.
-
-**After resolving the task (both paths):**
-
-- If the resolved task description contains more than 2 distinct deliverables, touches more than 3 files, or is too vague to implement in a single focused loop, stop and suggest running the **atomize** skill first.
-- If the task is ambiguous about language, framework, or key technical decisions, ask the user to clarify before proceeding.
+**After resolving (both paths):**
+- If the task has more than 2 distinct deliverables, touches more than 3 files, or is too vague for a single focused loop — stop and suggest running **atomize** first.
+- If language, framework, or key technical decisions are ambiguous — ask before proceeding.
 
 ---
 
@@ -53,44 +46,43 @@ Check for `.devkit/batch.json` first:
 ```bash
 cat .devkit/batch.json 2>/dev/null
 ```
-If it exists, read `branch` and `trunk` from it. This means `build` is orchestrating a batch run — the branch is already created and managed by build. Skip all branch creation logic and the PR status check below. Proceed directly to the Implementation section. (You'll also skip the push and PR steps in Finalize — build handles those.)
+If it exists, read `branch` and `trunk` from it — build is orchestrating a batch run. Skip all branch/PR logic and proceed directly to Implementation. (Also skip push/PR in Finalize — build handles those.)
 
-If the working directory has no source code, ask the user about project setup before proceeding.
+If the working directory has no source code, ask about project setup before proceeding.
 
-Check for uncommitted changes first:
+Check for uncommitted changes:
 ```
 git status --short
 ```
-If there are uncommitted changes, stop and ask the user to commit or stash them before continuing.
+If any exist, stop and ask the user to commit or stash before continuing.
 
-Check the current branch:
+Check current branch:
 ```
 git branch --show-current
 ```
 
-If already on a feature branch (not `main`, `master`, `develop`, or `trunk`), check whether a PR exists for it:
+If already on a feature branch (not `main`, `master`, `develop`, `trunk`):
 ```
 gh pr view --json state,title,url 2>/dev/null
 ```
-- **PR is open (not merged)** — tell the user the branch has an open PR, show the title and URL, then ask: "Do you want to add commits to this branch (continuing the open PR), or start a new branch for this task?"
-- **PR is merged** — tell the user this branch's PR was already merged. Suggest switching back to trunk.
-- **No PR / gh not available** — ask the user whether to continue on the existing branch or create a new one.
+- **PR open** — show title/URL, ask: add commits to this branch or start a new one?
+- **PR merged** — tell user; suggest switching back to trunk.
+- **No PR / gh unavailable** — ask whether to continue on existing branch or create a new one.
 
-If on a trunk branch (`main`, `master`, `develop`, or `trunk`), derive a branch name from the task title:
-- Prefix with `feat/`, lowercase, hyphenated, no special chars
-- Strip common filler words: "add", "the", "a", "an", "and", "to", "for", "of", "in", "with"
-- Keep the most meaningful tokens
-- Truncate to **40 characters max** (not counting the `feat/` prefix)
+If on trunk, derive a branch name from the task title:
+- Prefix `feat/`, lowercase, hyphenated, no special chars
+- Strip filler words: "add", "the", "a", "an", "and", "to", "for", "of", "in", "with"
+- Truncate to **40 characters max** (not counting `feat/`)
 
 ```
 git checkout -b feat/<branch-name>
 ```
-If the branch already exists, ask the user whether to switch to it or choose a different name.
+If branch already exists, ask to switch to it or choose a different name.
 
-Examples of the slug strategy:
-- `add POST /users route handler` → `feat/post-users-route-handler` (strip "add")
-- `add the user authentication middleware` → `feat/user-authentication-middleware` (strip "add", "the")
-- `create database connection pool manager with retry logic` → `feat/database-connection-pool-manager` (truncated at 40)
+Examples:
+- `add POST /users route handler` → `feat/post-users-route-handler`
+- `add the user authentication middleware` → `feat/user-authentication-middleware`
+- `create database connection pool manager with retry logic` → `feat/database-connection-pool-manager`
 
 If the task came from a numeric ID, mark it `in_progress`:
 ```
@@ -101,18 +93,11 @@ uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); co
 
 ## Implementation — Agent Delegation
 
-The main agent orchestrates, verifies, and enforces quality. Delegate to specialized agents for non-trivial tasks. For simple tasks, implement inline — agents add latency and token cost that aren't justified when the change is small.
+The main agent orchestrates, verifies, and enforces quality. Delegate to specialized agents for non-trivial tasks; implement inline for simple ones (agents add latency not justified for small changes).
 
-### When to implement inline vs. delegate
+**Implement inline** (no feature-dev, no code-review) when the task is a refactor, rename, swap, or removal — or changes ≤ 3 files and ≤ 50 lines with existing tests. Read the files, apply the change, run tests.
 
-**Implement inline** (no feature-dev, no code-review) when the task:
-- Is a refactor, rename, swap, or removal (e.g., "replace ORM X with Y", "remove deprecated import")
-- Will change ≤ 3 files and ≤ 50 lines of implementation code
-- Has existing tests that verify the behavior
-
-In these cases: read the relevant files, apply the change directly, run tests. Skip feature-dev. The loop's pre-commit inline review still applies.
-
-**Delegate to agents** when the task involves new functionality, business logic, or multiple interacting components — anything where understanding the broader codebase is load-bearing for correctness.
+**Delegate to agents** for new functionality, business logic, or multiple interacting components.
 
 ### Agent roster
 
@@ -126,37 +111,19 @@ In these cases: read the relevant files, apply the change directly, run tests. S
 | Pre-commit cleanup | **simplify** | Reduce redundancy, remove dead code, tighten style |
 | Pre-commit review | **code-review:code-review** | Review after simplify, before committing |
 
-### context7 — avoid redundant resolves
+If you already resolved a context7 library ID earlier in this build session, reuse it — skip the resolve call.
 
-If you already resolved a library ID earlier in this build session (e.g., the previous task queried the same library), reuse the library ID — skip the resolve call and go straight to query-docs. The library ID doesn't change between tasks.
+### Agent pipelines by task type
 
-### Agent collaboration
+| Task type | Pipeline |
+|-----------|----------|
+| Backend | context7 docs → feature-dev |
+| Frontend | context7 docs → frontend-design → feature-dev |
+| Full-stack | context7 docs → feature-dev (API) → frontend-design → feature-dev (UI) |
+| Worker/job | context7 docs → feature-dev |
+| Infrastructure | feature-dev only |
 
-Agents collaborate directly in a pipeline — each agent's output feeds into the next.
-
-**Frontend task** (e.g., build a dashboard page):
-1. **context7** → fetch framework/library docs
-2. **frontend-design:frontend-design** → produce UI/UX design
-3. **feature-dev:feature-dev** → implement components, hooks, pages based on the design
-
-**Backend task** (e.g., add a REST endpoint):
-1. **context7** → fetch library/framework docs
-2. **feature-dev:feature-dev** → implement route, service logic, data layer
-
-**Worker/job task** (e.g., background email sender, cron job):
-1. **context7** → fetch docs for queue/scheduler libraries
-2. **feature-dev:feature-dev** → implement the worker logic
-
-**Infrastructure task** (e.g., add Docker setup, CI/CD pipeline):
-1. **feature-dev:feature-dev** → create Dockerfiles, compose files, CI config
-
-**Full-stack task** (e.g., user profile page with API):
-1. **context7** → fetch docs for both frontend and backend libraries
-2. **feature-dev:feature-dev** → implement backend API first
-3. **frontend-design:frontend-design** → produce UI/UX design for the frontend
-4. **feature-dev:feature-dev** → implement frontend based on the design, wired to the API
-
-Review happens after simplify in the dev loop (see below), not inside the pipeline.
+Review happens after simplify in the dev loop, not inside the pipeline.
 
 ---
 
@@ -166,7 +133,7 @@ One logical unit per iteration, one commit per green test. The main agent orches
 
 ### Progress indicator
 
-At the start of each task run, before any work begins, print a checklist of the steps that will execute based on the task type. This is purely additive output — no behavior changes. Example for a backend task:
+Before any work begins, print a checklist of steps that will execute (mark skipped steps due to flags):
 
 ```
 Steps for this task:
@@ -179,30 +146,27 @@ Steps for this task:
 [ ] push + open PR  (skipped: --no-pr)
 ```
 
-Mark steps that will be skipped due to flags.
-
 ### The loop
 
-Before starting the first iteration, record the current HEAD SHA as the **pre-task SHA**:
+Record the current HEAD as **pre-task SHA** before starting:
 ```bash
 git rev-parse HEAD
 ```
-Store this value — it will be used for rollback if needed.
 
 Track **consecutive gate failure count** (reset to 0 after each successful commit).
 
-Repeat these steps for each logical unit until the task is complete:
+Repeat for each logical unit until the task is complete:
 
-1. **Delegate** — trigger the agent pipeline that matches the task type. Pass the task context and any prior fix feedback to the first agent.
-2. **Verify** — check the output against all [quality gates](#quality-gates).
-3. **Gates pass** — reset consecutive failure count to 0. Before committing, clean up and review the staged changes:
-   - Count the lines changed: `git diff --stat | tail -1`
-   - **≤ 50 lines**: review inline — scan the diff yourself for redundant code, unused imports, naming issues. Apply fixes directly. No agents needed.
-   - **51–200 lines**: run the **simplify** skill, then **code-review:code-review** on the result.
-   - **> 200 lines**: run the **simplify** skill (full pass), then **code-review:code-review**.
-   After any fixes, re-run tests to confirm they still pass. Then commit everything in one clean commit with a focused message.
-4. **Gates fail** — increment consecutive failure count. Send specific failure details back to the responsible agent for fixes.
-   - If consecutive failure count reaches **3**, stop delegating and present this menu to the user:
+1. **Delegate** — trigger the agent pipeline for the task type. Pass task context and any prior fix feedback.
+2. **Verify** — check output against all [quality gates](#quality-gates).
+3. **Gates pass** — reset failure count. Before committing, clean up staged changes:
+   - `git diff --stat | tail -1` to count lines changed
+   - **≤ 50 lines**: review inline — scan diff yourself, apply fixes directly.
+   - **51–200 lines**: run **simplify**, then **code-review:code-review**.
+   - **> 200 lines**: run **simplify** (full pass), then **code-review:code-review**.
+   Re-run tests after any fixes. Commit everything in one clean commit.
+4. **Gates fail** — increment failure count. Send specific failure details back to the agent.
+   - At **3 consecutive failures**, stop and present:
      ```
      Gate failed 3 times in a row.
      Options:
@@ -210,20 +174,20 @@ Repeat these steps for each logical unit until the task is complete:
      (2) stop — leave the branch as-is for manual resolution
      (3) rollback — reset to pre-task state and mark task pending
      ```
-   - **Rollback** — run `git reset --hard <pre-task SHA>`. If the task came from a numeric ID, reset its status to `pending`. Tell the user the branch is clean and the task is back in the queue. Commits from earlier tasks in the same build run are untouched.
-   - **Continue** — reset consecutive failure count to 0, delegate again.
-   - **Stop** — leave the branch and exit.
+   - **Rollback**: `git reset --hard <pre-task SHA>`. Reset task status to `pending` if from a numeric ID.
+   - **Continue**: reset failure count, delegate again.
+   - **Stop**: leave the branch and exit.
 
 ### Finalize
 
-Once all loop iterations are done, run these steps in order:
+Once all loop iterations are done:
 
-1. **Mark done** — if the task came from a numeric ID:
+1. **Mark done** — if from a numeric ID:
    ```
    uv run python -c "import sqlite3; conn = sqlite3.connect('.devkit/tasks.db'); conn.execute('UPDATE tasks SET status = ? WHERE id = ?', ('done', <id>)); conn.commit(); conn.close()"
    ```
 
-2. **Append to `.devkit/tasks.md`** — permanent history log. Use `git log origin/<trunk>..HEAD --stat` to scope to this branch only. For numeric tasks: `## task-<id>: <title>`, for text tasks: `## task: <title>`. Create the file if it doesn't exist; always append, never overwrite.
+2. **Append to `.devkit/tasks.md`** — use `git log origin/<trunk>..HEAD --stat` to scope to this branch. Create if missing; always append. Format:
    ```markdown
    ## task-<id>: <title>
    - libraries: <packages added — or "none">
@@ -232,11 +196,11 @@ Once all loop iterations are done, run these steps in order:
    - notes: <what a future session needs to know to continue this task>
    ```
 
-3. **Push** — if `.devkit/batch.json` exists or `--no-pr` was set, skip this step entirely. Otherwise:
-   - Ask user for confirmation, then push: `git push -u origin <branch-name>`
+3. **Push** — skip if `.devkit/batch.json` exists or `--no-pr` was set. Otherwise confirm with user, then:
+   - `git push -u origin <branch-name>`
    - Open a PR against trunk summarizing what was implemented.
 
-4. **Update `## Scope` in CLAUDE.md** — if `CLAUDE.md` exists in the project root, rewrite its `## Scope` section as a single, always-current description of what the entire project is and does after this PR. Skip if CLAUDE.md does not exist.
+4. **Update `## Scope` in CLAUDE.md** — if `CLAUDE.md` exists in the project root, rewrite its `## Scope` section to reflect the current state of the project after this PR. Skip if CLAUDE.md does not exist.
 
 5. **Print completion checklist**:
    ```
@@ -251,17 +215,16 @@ Once all loop iterations are done, run these steps in order:
    [x/skip] pushed + PR opened
    [x/skip] CLAUDE.md updated
    ```
-   Mark each as `x` (done) or `skip` (with reason).
 
 ### Quality gates
 
-The main agent checks every one of these after each agent delivers code. All must pass before committing.
+All must pass before committing:
 
-- [ ] Test runner exists — if no test framework is configured, stop and ask the user whether to add one before proceeding.
+- [ ] Test runner exists — if not configured, ask whether to add one before proceeding
 - [ ] All tests passing
-- [ ] Each commit is **100 lines of hand-written implementation code max** (tests, migrations, config, and generated code excluded)
-- [ ] If the project has coverage tooling configured, run it and verify coverage meets the project's threshold.
-- [ ] No dead code, unused imports, or stubs (run the project's linter if configured)
+- [ ] Each commit is **≤ 100 lines of hand-written implementation code** (tests, migrations, config, generated code excluded)
+- [ ] Coverage meets project threshold (if coverage tooling is configured)
+- [ ] No dead code, unused imports, or stubs (run linter if configured)
 - [ ] No unrelated changes in the diff
 - [ ] Follows existing codebase patterns and conventions
 - [ ] No hardcoded secrets or credentials
@@ -273,26 +236,14 @@ The main agent checks every one of these after each agent delivers code. All mus
 <verb>: <what the function does>
 ```
 
-Examples:
-- `add: get user by id from database`
-- `add: validate email format`
-- `fix: handle empty list in paginate`
-- `add: create order with default status`
+Examples: `add: get user by id from database` / `fix: handle empty list in paginate`
 
 ---
 
 ## What counts as "one function"
 
-A function is one named, testable unit. It does one thing. A logical unit is a coherent set of functions that can be tested as a group without depending on uncommitted code.
+A function is one named, testable unit that does one thing. Related functions that must exist together to be testable (e.g., a route handler and its validation schema) count as one logical unit.
 
-Good — each is independently testable:
-- `getUser(id)` — fetches a user by id
-- `hashPassword(plain)` — hashes a plain password
-- `sendWelcomeEmail(user)` — sends a welcome email
+**Good** (independently testable): `getUser(id)`, `hashPassword(plain)`, `sendWelcomeEmail(user)`
 
-Bad — too broad, split these:
-- `setupAuth()` — does too many things
-- `handleRequest()` — reads input, validates, queries DB, formats response
-- `initApp()` — wires everything together
-
-When related functions must exist together to be testable (e.g., a route handler and its request validation schema), they count as one logical unit and can be committed together.
+**Bad** (split these): `setupAuth()`, `handleRequest()`, `initApp()` — each does too many things
